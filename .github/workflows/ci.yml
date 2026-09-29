@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install modules
+        shell: pwsh
+        run: ./build/bootstrap.ps1
+      - name: PSScriptAnalyzer (syntax and commands checked against Windows PowerShell 5.1)
+        shell: pwsh
+        run: ./build/build.ps1 -Task Lint
+
+  test:
+    name: Test (${{ matrix.name }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows PowerShell 5.1
+            exe: powershell
+          - name: PowerShell 7
+            exe: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install modules
+        shell: pwsh
+        run: '& ${{ matrix.exe }} -NoProfile -ExecutionPolicy Bypass -File ./build/bootstrap.ps1; exit $LASTEXITCODE'
+      - name: Pester
+        shell: pwsh
+        run: '& ${{ matrix.exe }} -NoProfile -ExecutionPolicy Bypass -File ./build/build.ps1 -Task Test; exit $LASTEXITCODE'
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.exe }}
+          path: out/test-results.xml
+          if-no-files-found: ignore
+
+  build:
+    name: Build MSI
+    needs: [lint, test]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Install WiX
+        run: dotnet tool install --global wix --version 5.0.2
+      - name: Build
+        shell: pwsh
+        run: >
+          ./build/build.ps1 -Task Stage, Msi, Manifest
+          -Version "0.0.${{ github.run_number }}"
+          -ProjectUrl "${{ github.server_url }}/${{ github.repository }}"
+          -UpdateManifestUrl "${{ github.server_url }}/${{ github.repository }}/releases/latest/download/latest.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: msi
+          path: |
+            out/*.msi
+            out/*.sha256
+            out/latest.json
+            out/*-admx.zip
+
+  e2e:
+    name: End-to-end (install, print, deliver, uninstall)
+    needs: build
+    runs-on: windows-latest
+    # Non-blocking until it has proven stable on the hosted runner image (Spooler and the
+    # Print to PDF feature on Windows Server). Flip to false once it is reliably green.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: msi
+          path: out
+      - name: Run
+        shell: powershell
+        run: |
+          $msi = Get-ChildItem out/*.msi | Select-Object -First 1
+          ./tests/E2E/Invoke-E2ETest.ps1 -MsiPath $msi.FullName
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-diagnostics
+          path: out/e2e
+          if-no-files-found: ignore

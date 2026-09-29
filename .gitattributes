@@ -1,0 +1,5 @@
+* text=auto
+# Generated policy templates are written with CRLF; keep them byte-identical to the generator.
+*.admx text eol=crlf
+*.adml text eol=crlf
+*.ico binary

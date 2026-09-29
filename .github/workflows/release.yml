@@ -1,0 +1,76 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish ${{ github.ref_name }}
+    runs-on: windows-latest
+    env:
+      SIGNING_CERT_BASE64: ${{ secrets.SIGNING_CERT_BASE64 }}
+      SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Version from tag
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.TrimStart('v')
+          if ($version -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,5}$') { throw "Tag must look like v1.2.3 (got ${{ github.ref_name }})." }
+          "VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Lint and test (Windows PowerShell 5.1)
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File ./build/bootstrap.ps1
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ./build/bootstrap.ps1
+          ./build/build.ps1 -Task Lint
+          powershell -NoProfile -ExecutionPolicy Bypass -File ./build/build.ps1 -Task Test
+          exit $LASTEXITCODE
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Install WiX
+        run: dotnet tool install --global wix --version 5.0.2
+
+      - name: Decode signing certificate
+        if: env.SIGNING_CERT_BASE64 != ''
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGNING_CERT_BASE64))
+          "CERT_PATH=$pfx" >> $env:GITHUB_ENV
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $repoUrl = '${{ github.server_url }}/${{ github.repository }}'
+          $tasks = @('Stage')
+          $sign = @{}
+          if ($env:CERT_PATH) { $tasks += 'Sign'; $sign.CertificatePath = $env:CERT_PATH }
+          $tasks += 'Msi', 'Manifest'
+          ./build/build.ps1 -Task $tasks -Version $env:VERSION @sign `
+            -ProjectUrl $repoUrl `
+            -UpdateManifestUrl "$repoUrl/releases/latest/download/latest.json" `
+            -ReleaseDownloadUrl "$repoUrl/releases/download/${{ github.ref_name }}"
+
+      - name: Publish GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = Get-ChildItem out -File | Where-Object { $_.Name -match '\.(msi|sha256|zip)$' -or $_.Name -eq 'latest.json' } | ForEach-Object FullName
+          gh release create '${{ github.ref_name }}' @assets --title "ERP Printer $env:VERSION" --generate-notes --verify-tag
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      - name: Remove signing certificate
+        if: always() && env.CERT_PATH != ''
+        shell: pwsh
+        run: Remove-Item $env:CERT_PATH -Force -ErrorAction SilentlyContinue

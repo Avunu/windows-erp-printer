@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ERP Printer MSI (WiX Toolset v5). Built by build/build.ps1, roughly:
+
+    wix build installer/ErpPrinter.wxs -arch x64 -ext WixToolset.Util.wixext
+        -d Version=1.2.3 -d PayloadDir=<absolute path to staged files> -o out/ErpPrinter-1.2.3-x64.msi
+
+  Public properties seed configuration on install (msiexec /i ErpPrinter.msi /qn NAME=value ...):
+    PROFILE_NAME         printer/profile name (default "Send to ERP")
+    BACKEND              OdooJson2 | OdooJsonRpc | ERPNext | Webhook
+    SERVER_URL           creates/updates the profile when set
+    DATABASE, USERNAME   Odoo database and (JSON-RPC) login
+    API_KEY, API_SECRET  stored DPAPI-encrypted; hidden from MSI logs
+    AUTO_UPDATE          1 or 0
+    UPDATE_MANIFEST_URL  latest.json location (HTTPS or UNC)
+    LAUNCHCONFIG         0 to not open the configuration window after an interactive install
+    PURGE                1 on uninstall to also delete configuration and spooled documents
+
+  Upgrades are major upgrades. The deprovision action is skipped during an upgrade so
+  printers, tasks and configuration survive; the provision action is idempotent.
+-->
+<?ifndef ProjectUrl ?>
+<?define ProjectUrl = "https://github.com" ?>
+<?endif?>
+<?ifndef Manufacturer ?>
+<?define Manufacturer = "ERP Printer Project" ?>
+<?endif?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package Name="ERP Printer"
+           Manufacturer="$(Manufacturer)"
+           Version="$(Version)"
+           UpgradeCode="B93D3E79-AE9E-4D91-A3D8-47FE35CC1026"
+           Scope="perMachine"
+           Compressed="yes"
+           InstallerVersion="500">
+    <SummaryInformation Description="ERP Printer: virtual printers that send documents to Odoo, ERPNext or a webhook" />
+    <MajorUpgrade AllowSameVersionUpgrades="yes"
+                  Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="AppIcon" SourceFile="$(PayloadDir)\erp-printer.ico" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <Property Id="ARPURLINFOABOUT" Value="$(ProjectUrl)" />
+
+    <Property Id="PROFILE_NAME" Value="Send to ERP" Secure="yes" />
+    <Property Id="BACKEND" Secure="yes" />
+    <Property Id="SERVER_URL" Secure="yes" />
+    <Property Id="DATABASE" Secure="yes" />
+    <Property Id="USERNAME" Secure="yes" />
+    <Property Id="API_KEY" Secure="yes" Hidden="yes" />
+    <Property Id="API_SECRET" Secure="yes" Hidden="yes" />
+    <Property Id="AUTO_UPDATE" Secure="yes" />
+    <Property Id="UPDATE_MANIFEST_URL" Secure="yes" />
+    <Property Id="LAUNCHCONFIG" Value="1" Secure="yes" />
+    <Property Id="PURGE" Secure="yes" />
+    <!-- The provision command line contains the API key; keep it out of verbose logs. -->
+    <Property Id="CA_Provision" Hidden="yes" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="ERP Printer" />
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppMenuFolder" Name="ERP Printer" />
+    </StandardDirectory>
+
+    <ComponentGroup Id="Payload" Directory="INSTALLFOLDER">
+      <Files Include="$(PayloadDir)\**" />
+    </ComponentGroup>
+
+    <Component Id="StartMenuShortcut" Directory="AppMenuFolder">
+      <Shortcut Id="ConfigShortcut"
+                Name="ERP Printer Configuration"
+                Description="Configure ERP Printer queues and connections"
+                Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
+                Arguments="-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File &quot;[INSTALLFOLDER]ErpPrinterConfig.ps1&quot; -HideConsole"
+                WorkingDirectory="INSTALLFOLDER"
+                Icon="AppIcon" />
+      <RemoveFolder Id="RemoveAppMenuFolder" On="uninstall" />
+      <RegistryValue Root="HKLM" Key="Software\ErpPrinter\Installer" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Feature Id="Main" Title="ERP Printer" Level="1">
+      <ComponentGroupRef Id="Payload" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <!-- Provision (install, upgrade, repair): runs ErpPrinter.ps1 -Command Install as SYSTEM. -->
+    <SetProperty Id="CA_Provision" Sequence="execute" Before="CA_Provision"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]ErpPrinter.ps1&quot; -Command Install &quot;ProfileName=[PROFILE_NAME]&quot; &quot;Backend=[BACKEND]&quot; &quot;ServerUrl=[SERVER_URL]&quot; &quot;Database=[DATABASE]&quot; &quot;Username=[USERNAME]&quot; &quot;ApiKey=[API_KEY]&quot; &quot;ApiSecret=[API_SECRET]&quot; &quot;AutoUpdate=[AUTO_UPDATE]&quot; &quot;UpdateManifestUrl=[UPDATE_MANIFEST_URL]&quot;" />
+    <CustomAction Id="CA_Provision" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORTNAME)" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="no" Return="check" HideTarget="yes" />
+
+    <!-- Deprovision (real uninstall only): removes tasks, printers and ports. -->
+    <SetProperty Id="CA_Deprovision" Sequence="execute" Before="CA_Deprovision"
+                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]ErpPrinter.ps1&quot; -Command Uninstall &quot;Purge=[PURGE]&quot;" />
+    <CustomAction Id="CA_Deprovision" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORTNAME)" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="no" Return="ignore" />
+
+    <!-- Open the configuration window after an interactive install. -->
+    <SetProperty Id="WixShellExecTarget" Sequence="execute" Before="CA_LaunchConfig"
+                 Value="[AppMenuFolder]ERP Printer Configuration.lnk" />
+    <CustomAction Id="CA_LaunchConfig" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORTNAME)" DllEntry="WixShellExec"
+                  Execute="immediate" Impersonate="yes" Return="ignore" />
+
+    <InstallExecuteSequence>
+      <Custom Action="CA_Deprovision" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="CA_Provision" Before="InstallFinalize" Condition="NOT REMOVE=&quot;ALL&quot;" />
+      <Custom Action="CA_LaunchConfig" After="InstallFinalize" Condition="UILevel &gt;= 4 AND LAUNCHCONFIG=&quot;1&quot; AND NOT REMOVE" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>
