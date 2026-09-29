@@ -1,0 +1,38 @@
+name: Release
+
+# release-please keeps a release pull request open that bumps the version and updates
+# CHANGELOG.md from the Conventional Commits merged to main. Merging that pull request
+# creates the tag and GitHub release; the job below then builds and attaches the MSI.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created }}
+      tag_name: ${{ steps.rp.outputs.tag_name }}
+    steps:
+      - id: rp
+        uses: googleapis/release-please-action@v5
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # Tags created with GITHUB_TOKEN do not trigger `on: push: tags` workflows, so the asset
+  # build is called directly once release-please reports a new release.
+  assets:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/release-assets.yml
+    with:
+      tag_name: ${{ needs.release-please.outputs.tag_name }}
+    secrets: inherit

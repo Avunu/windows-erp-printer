@@ -1,27 +1,43 @@
-name: Release
+name: Release assets
 
+# Builds the MSI, latest.json, .sha256 and ADMX zip for a release and attaches them to it.
+# Called by release-please.yml after a release is created; run it by hand to rebuild the
+# assets of an existing release (for example after a failed build).
 on:
-  push:
-    tags: ['v*.*.*']
+  workflow_call:
+    inputs:
+      tag_name:
+        description: Release tag to build and attach assets to, e.g. v0.2.0.
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Existing release tag to (re)build, e.g. v0.2.0.
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
-  release:
-    name: Build and publish ${{ github.ref_name }}
+  build:
+    name: Build and attach ${{ inputs.tag_name }}
     runs-on: windows-latest
     env:
+      TAG_NAME: ${{ inputs.tag_name }}
       SIGNING_CERT_BASE64: ${{ secrets.SIGNING_CERT_BASE64 }}
       SIGNING_CERT_PASSWORD: ${{ secrets.SIGNING_CERT_PASSWORD }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag_name }}
 
       - name: Version from tag
         shell: pwsh
         run: |
-          $version = '${{ github.ref_name }}'.TrimStart('v')
-          if ($version -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,5}$') { throw "Tag must look like v1.2.3 (got ${{ github.ref_name }})." }
+          $version = $env:TAG_NAME -replace '^v', ''
+          if ($version -notmatch '^\d{1,3}\.\d{1,3}\.\d{1,5}$') { throw "Tag must look like v1.2.3 (got $env:TAG_NAME)." }
           "VERSION=$version" >> $env:GITHUB_ENV
 
       - name: Lint and test (Windows PowerShell 5.1)
@@ -59,15 +75,16 @@ jobs:
           ./build/build.ps1 -Task $tasks -Version $env:VERSION @sign `
             -ProjectUrl $repoUrl `
             -UpdateManifestUrl "$repoUrl/releases/latest/download/latest.json" `
-            -ReleaseDownloadUrl "$repoUrl/releases/download/${{ github.ref_name }}"
+            -ReleaseDownloadUrl "$repoUrl/releases/download/$env:TAG_NAME"
 
-      - name: Publish GitHub release
+      - name: Attach assets to the release
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           $assets = Get-ChildItem out -File | Where-Object { $_.Name -match '\.(msi|sha256|zip)$' -or $_.Name -eq 'latest.json' } | ForEach-Object FullName
-          gh release create '${{ github.ref_name }}' @assets --title "ERP Printer $env:VERSION" --generate-notes --verify-tag
+          gh release upload $env:TAG_NAME @assets --clobber
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
 
       - name: Remove signing certificate

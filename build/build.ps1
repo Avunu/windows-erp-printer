@@ -22,8 +22,9 @@
 [CmdletBinding()]
 param(
     [string[]] $Task = @('Lint', 'Test', 'Stage', 'Msi', 'Manifest'),
+    # Defaults to the module version, which release-please bumps on every release.
     [ValidatePattern('^\d{1,3}\.\d{1,3}\.\d{1,5}$')]
-    [string] $Version = '0.0.0',
+    [string] $Version,
     [string] $UpdateManifestUrl = '',
     [string] $ReleaseDownloadUrl = '',
     [string] $ProjectUrl = 'https://github.com',
@@ -41,6 +42,7 @@ $Task = @($Task | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() 
 $knownTasks = 'Lint', 'Test', 'Generate', 'Stage', 'Sign', 'Msi', 'Manifest'
 foreach ($name in $Task) { if ($knownTasks -notcontains $name) { throw "Unknown task '$name'. Valid tasks: $($knownTasks -join ', ')." } }
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+if (-not $Version) { $Version = (Import-PowerShellDataFile (Join-Path $root 'src\Modules\ErpPrinter\ErpPrinter.psd1')).ModuleVersion }
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null
 $OutputDir = (Resolve-Path $OutputDir).Path
 $payload = Join-Path $OutputDir 'payload'

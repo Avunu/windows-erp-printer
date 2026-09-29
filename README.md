@@ -35,7 +35,7 @@ It is a thin layer over what Windows already has: the inbox **Microsoft Print to
 -   **Configuration GUI** (Windows Forms, launched from the Start menu). It is generated from the settings schema, respects policy-locked values, tests connections, prints test pages and shows queue status.
 -   **MSI installer** (WiX v5) that supports silent install and pre-seeding a printer profile from MSI properties, for Intune, GPO, SCCM or RMM.
 -   **Auto-updater** that checks a `latest.json` manifest (GitHub Releases by default, or your own HTTPS or UNC location), verifies SHA-256 and optionally Authenticode, then runs a silent major upgrade.
--   **CI** with PSScriptAnalyzer (including Windows PowerShell 5.1 compatibility rules), Pester on Windows PowerShell 5.1 and PowerShell 7, an MSI build, an end-to-end test that installs, prints and uninstalls on a Windows runner, and tag-triggered releases.
+-   **CI** with PSScriptAnalyzer (including Windows PowerShell 5.1 compatibility rules), Pester on Windows PowerShell 5.1 and PowerShell 7, an MSI build, an end-to-end test that installs, prints and uninstalls on a Windows runner, and release-please releases with a changelog generated from Conventional Commits.
 
 ## Requirements
 
@@ -160,4 +160,4 @@ See [docs/development.md](docs/development.md). In short:
 ./build/build.ps1 -Task Stage, Msi, Manifest -Version 1.0.0   # Windows + WiX 5
 ```
 
-Releases are cut by pushing a `vX.Y.Z` tag.
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/); release-please turns them into version bumps, [CHANGELOG.md](CHANGELOG.md) and GitHub releases. See [development.md](docs/development.md#releases).

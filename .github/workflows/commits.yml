@@ -1,0 +1,28 @@
+name: Commits
+
+# release-please derives the next version and CHANGELOG.md from commit messages, so every
+# commit in a pull request must follow Conventional Commits. The pull request title is
+# checked too, because a squash merge uses it as the commit message.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  conventional:
+    name: Conventional Commits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Pull request title
+        shell: pwsh
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: ./build/Test-CommitMessage.ps1 -Message $env:PR_TITLE
+      - name: Commit messages
+        shell: pwsh
+        run: ./build/Test-CommitMessage.ps1 -From ${{ github.event.pull_request.base.sha }} -To ${{ github.event.pull_request.head.sha }}

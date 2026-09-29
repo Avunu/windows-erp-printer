@@ -64,15 +64,53 @@ The unit tests replace the registry and DPAPI with in-memory fakes (`tests/Unit/
 | Build MSI | WiX v5 build, versioned `0.0.<run number>`; MSI, manifest and ADMX uploaded as an artifact |
 | End-to-end | Installs the MSI on the runner, prints, verifies delivery to a local webhook, uninstalls. Marked `continue-on-error` until it has proven stable on the hosted image |
 
+`.github/workflows/commits.yml` checks every commit in a pull request, and the pull request title, against the rules in [Commit messages](#commit-messages).
+
 Dependabot keeps the workflow actions current.
+
+## Commit messages
+
+Releases are driven by [Conventional Commits](https://www.conventionalcommits.org/), so commit messages decide the next version and the changelog:
+
+| Commit | Release | Changelog section |
+| --- | --- | --- |
+| `fix(uploader): retry on HTTP 429` | patch | Bug Fixes |
+| `feat(erpnext): attach to a document by template` | minor | Features |
+| `feat!: ...` or a `BREAKING CHANGE:` footer | major (minor while below 1.0) | Breaking changes |
+| `perf:`, `revert:` | patch | Performance Improvements, Reverts |
+| `docs:`, `test:`, `ci:`, `build:`, `refactor:`, `style:`, `chore:` | none on their own | hidden |
+
+Allowed types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`, `revert`, `style`, `test`. Useful scopes are the component names: `listener`, `uploader`, `gui`, `installer`, `updater`, `odoo`, `erpnext`, `webhook`, `config`.
+
+Keep HTML-like tags out of the subject and any `BREAKING CHANGE:` note (write "the picture element", not the tag). release-please round-trips the release PR body through an HTML parser, and a raw tag there can silently drop the release. The checker rejects them.
+
+`build/Test-CommitMessage.ps1` holds the rules. CI runs it on pull requests; to run it on every local commit:
+
+```sh
+git config core.hooksPath .githooks
+```
+
+If you squash-merge, the pull request title becomes the commit message, which is why CI checks the title too.
 
 ## Releases
 
-1. Update the version references if needed (the version comes from the tag).
-2. `git tag v1.2.3 && git push origin v1.2.3`.
-3. `.github/workflows/release.yml` lints, tests, builds (and signs, if configured), then creates the GitHub release with the MSI, `.sha256`, `latest.json` and the ADMX zip.
+Releases are automated with [release-please](https://github.com/googleapis/release-please) (`.github/workflows/release-please.yml`, configured by `release-please-config.json`):
 
-Installed clients check `releases/latest/download/latest.json` daily and upgrade themselves.
+1. Every push to `main` updates an open **release pull request** titled `chore(main): release X.Y.Z`. It bumps the version in `ErpPrinter.psd1` and `BuildInfo.psd1` (the lines marked `x-release-please-version`) and adds the new commits to `CHANGELOG.md`.
+2. Merging that pull request creates the `vX.Y.Z` tag and a GitHub release whose notes are the changelog entry.
+3. The same workflow then calls `release-assets.yml`. That lints and tests on Windows PowerShell 5.1, builds (and signs, if configured) the MSI, and attaches the MSI, `.sha256`, `latest.json` and the ADMX zip to the release.
+
+Installed clients check `releases/latest/download/latest.json` daily and upgrade themselves. For the few minutes between the release appearing and its assets being attached, that URL returns 404. The updater logs this and tries again the next day. If an asset build fails, fix the problem and run **Release assets** manually (Actions tab) with the tag. Clients stay on the previous version until then.
+
+Useful controls:
+
+- **Force a version:** add a `Release-As: 1.0.0` footer to a commit on `main`.
+- **First release:** the config starts at `0.1.0`. release-please opens its first pull request once `main` has a `feat:` or `fix:` commit.
+
+Repository settings this needs:
+
+- **Settings > Actions > General > Workflow permissions:** allow GitHub Actions to create and approve pull requests, or release-please cannot open its pull request.
+- Pull requests opened with the default `GITHUB_TOKEN` do not trigger other workflows, so CI does not run on the release pull request. If `main` requires status checks, either exempt that branch or give the action a GitHub App or fine-grained token via its `token` input.
 
 ### Code signing
 
@@ -109,7 +147,7 @@ When they are present, the release workflow Authenticode-signs every script in t
 
 ## Architecture notes
 
-- **Why a named pipe:** each spooler connection to the port is exactly one complete job. There are no partial files, overwrites or polling. If the listener is down, jobs wait in the queue. See [plan.md](../plan.md).
+- **Why a named pipe:** each spooler connection to the port is exactly one complete job. There are no partial files, overwrites or polling. If the listener is down, jobs wait in the queue. A fixed-name file port with a FileSystemWatcher, by contrast, races on half-written files, overwrites and locked files.
 - **Why scheduled tasks and not a service:** Windows PowerShell cannot host a service without a wrapper. The tasks start at boot, have unlimited run time, and have a 5-minute watchdog trigger with `IgnoreNew`, so a crashed loop is restarted.
 - **Listener:** one process, one asynchronous pipe instance per enabled profile. It reloads profiles every 30 s and reconciles the Windows printers when they change. Before reading the pipe, it looks up the job that is in `Printing` state on that queue, to get the user and title.
 - **Uploader:** single instance (global mutex). Woken by a named event when a job lands, otherwise polls. Writes are atomic (`.tmp` + rename). The sidecar is written after the PDF, so a sidecar means a complete PDF, and orphaned PDFs are adopted after five minutes.

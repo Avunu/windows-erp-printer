@@ -1,6 +1,6 @@
 @{
     RootModule           = 'ErpPrinter.psm1'
-    ModuleVersion        = '0.0.0'
+    ModuleVersion        = '0.0.0' # x-release-please-version
     GUID                 = '6f0f4c1e-6a7b-4f3e-9d51-2f3b7f1c9a10'
     Author               = 'ERP Printer contributors'
     CompanyName          = 'ERP Printer'
