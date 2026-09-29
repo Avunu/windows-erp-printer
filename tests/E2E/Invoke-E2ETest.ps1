@@ -9,10 +9,12 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string] $MsiPath,
-    [string] $ArtifactDir = (Join-Path $PSScriptRoot '..\..\out\e2e'),
+    [string] $ArtifactDir,
     [int] $TimeoutSeconds = 120
 )
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 leaves $PSScriptRoot empty in param() defaults under -File, so resolve here.
+if (-not $ArtifactDir) { $ArtifactDir = Join-Path $PSScriptRoot '..\..\out\e2e' }
 New-Item -ItemType Directory -Force -Path $ArtifactDir | Out-Null
 $ArtifactDir = (Resolve-Path $ArtifactDir).Path
 $MsiPath = (Resolve-Path $MsiPath).Path

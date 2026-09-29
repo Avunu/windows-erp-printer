@@ -112,6 +112,50 @@ function Remove-ErpPrinterPort {
     }
 }
 
+function Get-ErpStartMenuShortcutPath {
+    Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\ERP Printer\ERP Printer Configuration.lnk'
+}
+
+function Install-ErpStartMenuShortcut {
+    <#
+    Creates the all-users Start Menu shortcut for the configuration GUI. The MSI also declares
+    this as a tracked component, but installs done straight through the module (no MSI) need it
+    too, so Install-ErpPrinter creates it here as well; writing the same shortcut twice is harmless.
+    #>
+    [CmdletBinding(SupportsShouldProcess)]
+    param([Parameter(Mandatory)] [string] $InstallDir)
+    $path = Get-ErpStartMenuShortcutPath
+    if (-not $PSCmdlet.ShouldProcess($path, 'Create Start Menu shortcut')) { return }
+    $folder = Split-Path -Parent $path
+    if (-not (Test-Path -LiteralPath $folder)) { New-Item -ItemType Directory -Path $folder -Force | Out-Null }
+    $icon = Join-Path $InstallDir 'erp-printer.ico'
+    $shell = New-Object -ComObject WScript.Shell
+    try {
+        $shortcut = $shell.CreateShortcut($path)
+        $shortcut.TargetPath = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+        $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$(Join-Path $InstallDir 'ErpPrinterConfig.ps1')`" -HideConsole"
+        $shortcut.WorkingDirectory = $InstallDir
+        $shortcut.Description = 'Configure ERP Printer queues and connections'
+        if (Test-Path -LiteralPath $icon) { $shortcut.IconLocation = $icon }
+        $shortcut.Save()
+    } finally {
+        [Runtime.InteropServices.Marshal]::ReleaseComObject($shell) | Out-Null
+    }
+}
+
+function Remove-ErpStartMenuShortcut {
+    [CmdletBinding(SupportsShouldProcess)]
+    param()
+    $path = Get-ErpStartMenuShortcutPath
+    if (-not (Test-Path -LiteralPath $path)) { return }
+    if (-not $PSCmdlet.ShouldProcess($path, 'Remove Start Menu shortcut')) { return }
+    Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+    $folder = Split-Path -Parent $path
+    if ((Test-Path -LiteralPath $folder) -and -not @(Get-ChildItem -LiteralPath $folder -ErrorAction SilentlyContinue)) {
+        Remove-Item -LiteralPath $folder -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Set-ErpPrinterQueue {
     <# Creates or repairs one printer queue so it uses the PDF driver on the given port. #>
     [CmdletBinding(SupportsShouldProcess)]

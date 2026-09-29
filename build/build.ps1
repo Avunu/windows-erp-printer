@@ -29,7 +29,7 @@ param(
     [string] $ReleaseDownloadUrl = '',
     [string] $ProjectUrl = 'https://github.com',
     [string] $Commit = '',
-    [string] $OutputDir = (Join-Path $PSScriptRoot '..\out'),
+    [string] $OutputDir,
     [string] $CertificatePath,
     [string] $CertificatePasswordEnvVar = 'SIGNING_CERT_PASSWORD',
     [string] $TimestampServer = 'http://timestamp.digicert.com',
@@ -41,6 +41,8 @@ Set-StrictMode -Version 2.0
 $Task = @($Task | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $knownTasks = 'Lint', 'Test', 'Generate', 'Stage', 'Sign', 'Msi', 'Manifest'
 foreach ($name in $Task) { if ($knownTasks -notcontains $name) { throw "Unknown task '$name'. Valid tasks: $($knownTasks -join ', ')." } }
+# Windows PowerShell 5.1 leaves $PSScriptRoot empty in param() defaults under -File, so resolve here.
+if (-not $OutputDir) { $OutputDir = Join-Path $PSScriptRoot '..\out' }
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 if (-not $Version) { $Version = (Import-PowerShellDataFile (Join-Path $root 'src\Modules\ErpPrinter\ErpPrinter.psd1')).ModuleVersion }
 New-Item -ItemType Directory -Force -Path $OutputDir | Out-Null

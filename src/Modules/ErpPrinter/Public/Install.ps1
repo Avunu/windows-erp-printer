@@ -66,6 +66,12 @@ function Install-ErpPrinter {
         Write-ErpLog -Level Error -Message "Printer provisioning failed: $($_.Exception.Message)"
     }
 
+    try {
+        Install-ErpStartMenuShortcut -InstallDir $InstallDir
+    } catch {
+        Write-ErpLog -Level Warning -Message "Could not create the Start Menu shortcut: $($_.Exception.Message)"
+    }
+
     Register-ErpScheduledTasks -InstallDir $InstallDir
     if (-not $NoStart) { Restart-ErpPrinterService }
     Write-ErpLog -Message "$script:ErpProductName $(Get-ErpPrinterVersion) installed in $InstallDir."
@@ -99,6 +105,7 @@ function Uninstall-ErpPrinter {
     $config = Get-ErpPrinterConfig
 
     Unregister-ErpScheduledTasks -Confirm:$false
+    Remove-ErpStartMenuShortcut -Confirm:$false
     foreach ($entry in Get-ErpManagedPrinters) {
         try {
             if (Get-Printer | Where-Object { $_.Name -eq $entry.Printer }) { Remove-Printer -Name $entry.Printer }

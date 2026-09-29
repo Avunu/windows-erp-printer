@@ -9,10 +9,12 @@
 #>
 [CmdletBinding()]
 param(
-    [string] $OutputDir = (Join-Path $PSScriptRoot '..\policies'),
+    [string] $OutputDir,
     [string] $Revision = '1.0'
 )
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 leaves $PSScriptRoot empty in param() defaults under -File, so resolve here.
+if (-not $OutputDir) { $OutputDir = Join-Path $PSScriptRoot '..\policies' }
 $module = Import-Module (Join-Path $PSScriptRoot '..\src\Modules\ErpPrinter\ErpPrinter.psd1') -Force -PassThru
 $schema = @(Get-ErpPrinterSettingSchema -Scope Global)
 $defaults = & $module { Resolve-ErpSettings -Schema $script:ErpGlobalSchema }
