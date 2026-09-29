@@ -22,6 +22,9 @@
 <?ifndef ProjectUrl ?>
 <?define ProjectUrl = "https://github.com" ?>
 <?endif?>
+<!-- The util extension's custom action DLL for the x64 package (WiX 5 has no arch-name
+     preprocessor variable; the IDs are Wix4UtilCA_X86, Wix4UtilCA_X64 and Wix4UtilCA_A64). -->
+<?define UtilCA = "Wix4UtilCA_X64" ?>
 <?ifndef Manufacturer ?>
 <?define Manufacturer = "ERP Printer Project" ?>
 <?endif?>
@@ -78,7 +81,9 @@
                 WorkingDirectory="INSTALLFOLDER"
                 Icon="AppIcon" />
       <RemoveFolder Id="RemoveAppMenuFolder" On="uninstall" />
-      <RegistryValue Root="HKLM" Key="Software\ErpPrinter\Installer" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      <!-- ICE38/ICE43 require a Start menu component's key path to be under HKCU, even in a
+           per-machine package; this is WiX's documented shortcut pattern. -->
+      <RegistryValue Root="HKCU" Key="Software\ErpPrinter" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
     <Feature Id="Main" Title="ERP Printer" Level="1">
@@ -89,19 +94,19 @@
     <!-- Provision (install, upgrade, repair): runs ErpPrinter.ps1 -Command Install as SYSTEM. -->
     <SetProperty Id="CA_Provision" Sequence="execute" Before="CA_Provision"
                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]ErpPrinter.ps1&quot; -Command Install &quot;ProfileName=[PROFILE_NAME]&quot; &quot;Backend=[BACKEND]&quot; &quot;ServerUrl=[SERVER_URL]&quot; &quot;Database=[DATABASE]&quot; &quot;Username=[USERNAME]&quot; &quot;ApiKey=[API_KEY]&quot; &quot;ApiSecret=[API_SECRET]&quot; &quot;AutoUpdate=[AUTO_UPDATE]&quot; &quot;UpdateManifestUrl=[UPDATE_MANIFEST_URL]&quot;" />
-    <CustomAction Id="CA_Provision" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORTNAME)" DllEntry="WixQuietExec"
+    <CustomAction Id="CA_Provision" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec"
                   Execute="deferred" Impersonate="no" Return="check" HideTarget="yes" />
 
     <!-- Deprovision (real uninstall only): removes tasks, printers and ports. -->
     <SetProperty Id="CA_Deprovision" Sequence="execute" Before="CA_Deprovision"
                  Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]ErpPrinter.ps1&quot; -Command Uninstall &quot;Purge=[PURGE]&quot;" />
-    <CustomAction Id="CA_Deprovision" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORTNAME)" DllEntry="WixQuietExec"
+    <CustomAction Id="CA_Deprovision" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
     <!-- Open the configuration window after an interactive install. -->
     <SetProperty Id="WixShellExecTarget" Sequence="execute" Before="CA_LaunchConfig"
                  Value="[AppMenuFolder]ERP Printer Configuration.lnk" />
-    <CustomAction Id="CA_LaunchConfig" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORTNAME)" DllEntry="WixShellExec"
+    <CustomAction Id="CA_LaunchConfig" BinaryRef="$(UtilCA)" DllEntry="WixShellExec"
                   Execute="immediate" Impersonate="yes" Return="ignore" />
 
     <InstallExecuteSequence>
