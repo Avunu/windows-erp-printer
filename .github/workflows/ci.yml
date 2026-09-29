@@ -18,7 +18,7 @@ jobs:
     name: Lint
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install modules
         shell: pwsh
         run: ./build/bootstrap.ps1
@@ -38,7 +38,7 @@ jobs:
           - name: PowerShell 7
             exe: pwsh
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install modules
         shell: pwsh
         run: '& ${{ matrix.exe }} -NoProfile -ExecutionPolicy Bypass -File ./build/bootstrap.ps1; exit $LASTEXITCODE'
@@ -58,7 +58,7 @@ jobs:
     needs: [lint, test]
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
@@ -88,7 +88,7 @@ jobs:
     # Print to PDF feature on Windows Server). Flip to false once it is reliably green.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/download-artifact@v4
         with:
           name: msi
