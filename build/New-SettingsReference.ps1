@@ -3,8 +3,10 @@
     Generates docs/settings.md from the module's settings schema.
 #>
 [CmdletBinding()]
-param([string] $OutputPath = (Join-Path $PSScriptRoot '..\docs\settings.md'))
+param([string] $OutputPath)
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 leaves $PSScriptRoot empty in param() defaults under -File, so resolve here.
+if (-not $OutputPath) { $OutputPath = Join-Path $PSScriptRoot '..\docs\settings.md' }
 $module = Import-Module (Join-Path $PSScriptRoot '..\src\Modules\ErpPrinter\ErpPrinter.psd1') -Force -PassThru
 
 function Format-Default($Setting, $Resolved) {

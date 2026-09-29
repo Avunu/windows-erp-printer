@@ -4,3 +4,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # Conventional Commits title ("ci(deps): bump ..."), so the commit check passes and the
+    # update stays out of the changelog.
+    commit-message:
+      prefix: ci
+      include: scope
