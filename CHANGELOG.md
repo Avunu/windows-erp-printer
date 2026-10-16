@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/Avunu/windows-erp-printer/compare/v0.1.0...v0.2.0) (2026-10-16)
+
+
+### Features
+
+* adds edi.exchange.record to the Odoo model choices ([477f6cb](https://github.com/Avunu/windows-erp-printer/commit/477f6cbcaadc6462eebddefd8e56a837e70bcd18))
+* adds edi.exchange.record to the Odoo model choices ([4c8285d](https://github.com/Avunu/windows-erp-printer/commit/4c8285d1b5b7cd8d8f40dbe66339633febd2ceee))
+
 ## 0.1.0 (2026-09-29)
 
 
