@@ -13,6 +13,9 @@ $ErrorActionPreference = 'Stop'
 if (-not (Get-PackageProvider -ListAvailable -Name NuGet -ErrorAction SilentlyContinue)) {
     Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
 }
+if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+    Register-PSRepository -Default
+}
 Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
 foreach ($module in @(@{ Name = 'Pester'; Version = $PesterVersion }, @{ Name = 'PSScriptAnalyzer'; Version = $ScriptAnalyzerVersion })) {
     if (-not (Get-Module -ListAvailable -Name $module.Name | Where-Object { $_.Version -eq [version]$module.Version })) {
