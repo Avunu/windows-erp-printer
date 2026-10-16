@@ -67,14 +67,12 @@ A value under `Policies` wins and shows as read-only in the configuration window
 
 | Name | Type | Default | Backends | Description |
 | --- | --- | --- | --- | --- |
-| `OdooModel` | REG_SZ: `documents.document`, `ir.attachment`, `edi.exchange.record` | `documents.document` | OdooJson2, OdooJsonRpc | Odoo model. documents.document needs the Documents app (Enterprise). ir.attachment works on Community. edi.exchange.record needs the OCA edi_core_oca module. |
-| `OdooFolderId` | REG_DWORD 0-2147483647 | `0` | OdooJson2, OdooJsonRpc | Documents folder ID. Target folder for documents.document. 0 leaves it unset. |
-| `OdooResModel` | REG_SZ | (empty) | OdooJson2, OdooJsonRpc | Attach to model. For ir.attachment: model of the record to attach to, e.g. res.partner. |
-| `OdooResId` | REG_DWORD 0-2147483647 | `0` | OdooJson2, OdooJsonRpc | Attach to record ID. |
-| `OdooEdiBackendId` | REG_DWORD 0-2147483647 | `0` | OdooJson2, OdooJsonRpc | EDI backend ID. For edi.exchange.record: id of the edi.backend that receives the documents. |
-| `OdooEdiExchangeType` | REG_SZ | (empty) | OdooJson2, OdooJsonRpc | EDI exchange type code. For edi.exchange.record: code of an input edi.exchange.type on that backend (or shared by its backend type). |
-| `OdooExtraFields` | REG_SZ | (empty) | OdooJson2, OdooJsonRpc | Extra fields (JSON). JSON object merged into the created record. Template tokens are expanded, e.g. {"description": "Printed by {user}"}. |
-| `UserMapping` | REG_DWORD 0/1 | 0 (off) | OdooJson2, OdooJsonRpc | Map Windows users to Odoo users. Looks up the printing user in res.users (login or email) and sets owner_id on documents.document. |
+| `OdooModel` | REG_SZ | `ir.attachment` | OdooJson2, OdooJsonRpc | Odoo model. Technical name of the model a record is created in. Any model the API user may create works: ir.attachment (every edition), documents.document (Documents app), edi.exchange.record (OCA EDI) or your own. |
+| `OdooFileField` | REG_SZ | `datas` | OdooJson2, OdooJsonRpc | File field. Binary field of the model that receives the PDF, e.g. datas on ir.attachment and documents.document, or exchange_file on edi.exchange.record. |
+| `OdooNameField` | REG_SZ | `name` | OdooJson2, OdooJsonRpc | File name field. Field that receives the file name, e.g. name, or exchange_filename on edi.exchange.record. Leave empty if the model has none. |
+| `OdooDefaultValues` | REG_SZ | (empty) | OdooJson2, OdooJsonRpc | Default values (JSON). JSON object of field values set on every created record, like the default values of an Odoo mail alias, e.g. {"folder_id": 7, "description": "Printed by {user}"}. Template tokens are expanded in strings. These override the file name and user fields. |
+| `UserMapping` | REG_DWORD 0/1 | 0 (off) | OdooJson2, OdooJsonRpc | Map Windows users to Odoo users. Looks up the printing user in res.users (login or email) and writes the match to the user field. |
+| `OdooUserField` | REG_SZ | `owner_id` | OdooJson2, OdooJsonRpc | User field. Many2one field to res.users that receives the mapped user, e.g. owner_id on documents.document or user_id on most other models. |
 | `UserEmailDomain` | REG_SZ | (empty) | OdooJson2, OdooJsonRpc | User email domain. Optional. Also tries <username>@<domain> when mapping users. Active Directory mail/UPN are tried automatically. |
 | `ERPNextFolder` | REG_SZ | `Home` | ERPNext | File folder. |
 | `ERPNextDoctype` | REG_SZ | (empty) | ERPNext | Attach to DocType. |

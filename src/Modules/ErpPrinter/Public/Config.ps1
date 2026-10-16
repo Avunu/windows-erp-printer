@@ -97,7 +97,7 @@ function Set-ErpPrinterSetting {
         Values equal to the default are removed rather than stored, so defaults can change
         in later versions. Use -Clear to remove an explicit value. Policy values still win.
     .EXAMPLE
-        Set-ErpPrinterSetting -ProfileName 'Send to Odoo' -Name OdooFolderId -Value 42
+        Set-ErpPrinterSetting -ProfileName 'Send to Odoo' -Name OdooDefaultValues -Value '{"folder_id": 42}'
     #>
     [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Set')]
     param(
@@ -139,7 +139,7 @@ function New-ErpPrinterProfile {
     .SYNOPSIS
         Creates a printer profile. Run Sync-ErpPrinterQueue afterwards to create the Windows printer.
     .EXAMPLE
-        New-ErpPrinterProfile -Name 'Send to Odoo' -Settings @{ Backend = 'OdooJson2'; ServerUrl = 'https://acme.odoo.com'; OdooFolderId = 7 }
+        New-ErpPrinterProfile -Name 'Send to Odoo' -Settings @{ Backend = 'OdooJson2'; ServerUrl = 'https://acme.odoo.com'; OdooModel = 'documents.document'; OdooDefaultValues = '{"folder_id": 7}' }
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param(
@@ -252,15 +252,16 @@ function Test-ErpPrinterProfile {
     if ($backend -eq 'ERPNext' -and -not (& $hasSecret 'ApiSecret')) { $problems.Add('ERPNext needs an API secret as well as an API key.') }
     if ($backend -eq 'OdooJsonRpc' -and -not $PrinterProfile.Username) { $problems.Add('Odoo JSON-RPC needs the login of the API user.') }
     if ($script:ErpOdooBackends -contains $backend) {
-        if ($PrinterProfile.OdooModel -eq 'ir.attachment' -and [bool]$PrinterProfile.OdooResModel -ne [bool]$PrinterProfile.OdooResId) {
-            $problems.Add('Set both "Attach to model" and "Attach to record ID", or neither.')
+        $fieldPattern = '^[A-Za-z_][A-Za-z0-9_]*$'
+        if ($PrinterProfile.OdooModel -notmatch '^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)*$') {
+            $problems.Add('Odoo model must be a technical model name such as ir.attachment.')
         }
-        if ($PrinterProfile.OdooModel -eq 'edi.exchange.record' -and ($PrinterProfile.OdooEdiBackendId -le 0 -or -not $PrinterProfile.OdooEdiExchangeType)) {
-            $problems.Add('edi.exchange.record needs "EDI backend ID" and "EDI exchange type code".')
-        }
-        if ($PrinterProfile.OdooExtraFields) {
-            try { $null = ConvertFrom-Json $PrinterProfile.OdooExtraFields -ErrorAction Stop }
-            catch { $problems.Add('Extra fields must be a JSON object.') }
+        if ($PrinterProfile.OdooFileField -notmatch $fieldPattern) { $problems.Add('File field must be the technical name of a binary field, such as datas.') }
+        if ($PrinterProfile.OdooNameField -and $PrinterProfile.OdooNameField -notmatch $fieldPattern) { $problems.Add('File name field must be a technical field name such as name, or empty.') }
+        if ($PrinterProfile.UserMapping -and $PrinterProfile.OdooUserField -notmatch $fieldPattern) { $problems.Add('User field must be a technical field name such as owner_id when users are mapped.') }
+        if ($PrinterProfile.OdooDefaultValues) {
+            try { $null = ConvertFrom-ErpJsonObject $PrinterProfile.OdooDefaultValues }
+            catch { $problems.Add("Default values are not a valid JSON object: $($_.Exception.Message)") }
         }
     }
     if ($backend -eq 'ERPNext' -and [bool]$PrinterProfile.ERPNextDoctype -ne [bool]$PrinterProfile.ERPNextDocname) {

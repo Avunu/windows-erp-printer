@@ -40,18 +40,13 @@ function Send-ErpOdooJson2Document {
         [Parameter(Mandatory)] [hashtable] $Secrets
     )
     $common = @{ PrinterProfile = $PrinterProfile; GlobalSettings = $GlobalSettings; Secrets = $Secrets }
-    $searchRead = {
-        param($model, $domain, $fields)
-        Invoke-ErpOdooJson2 @common -Model $model -Method 'search_read' -Body @{ domain = $domain; fields = $fields }
-    }
     $ownerId = Resolve-ErpOdooOwnerId -PrinterProfile $PrinterProfile -Meta $Meta -SearchUser {
         param($domain)
         $users = Invoke-ErpOdooJson2 @common -Model 'res.users' -Method 'search_read' -Body @{ domain = $domain; fields = @('id'); limit = 1 }
         $first = @($users) | Select-Object -First 1
         if ($first) { $first.id }
     }
-    $typeId = Resolve-ErpOdooEdiExchangeTypeId -PrinterProfile $PrinterProfile -SearchRead $searchRead
-    $vals = Get-ErpOdooVals -PrinterProfile $PrinterProfile -Meta $Meta -FileName $FileName -OwnerId $ownerId -ExchangeTypeId $typeId
+    $vals = Get-ErpOdooVals -PrinterProfile $PrinterProfile -Meta $Meta -FileName $FileName -OwnerId $ownerId
     $result = Invoke-ErpOdooJson2 @common -Model $PrinterProfile.OdooModel -Method 'create' -Body @{ vals_list = @(, $vals) } -PayloadPath $PdfPath
     [string](@($result) | Select-Object -First 1)
 }
@@ -65,11 +60,11 @@ function Test-ErpOdooJson2Connection {
         [Parameter(Mandatory)] [hashtable] $Secrets
     )
     $common = @{ PrinterProfile = $PrinterProfile; GlobalSettings = $GlobalSettings; Secrets = $Secrets }
-    $searchRead = {
-        param($model, $domain, $fields)
-        Invoke-ErpOdooJson2 @common -Model $model -Method 'search_read' -Body @{ domain = $domain; fields = $fields }
+    $fieldsGet = {
+        param($model, $fieldNames)
+        Invoke-ErpOdooJson2 @common -Model $model -Method 'fields_get' -Body @{ allfields = $fieldNames; attributes = @('type') }
     }
     $count = Invoke-ErpOdooJson2 @common -Model $PrinterProfile.OdooModel -Method 'search_count' -Body @{ domain = @() }
     "Connected to Odoo (JSON-2). The API user can see $count $($PrinterProfile.OdooModel) records." +
-        (Get-ErpOdooEdiTestMessage -PrinterProfile $PrinterProfile -SearchRead $searchRead)
+        (Get-ErpOdooFieldCheckMessage -PrinterProfile $PrinterProfile -FieldsGet $fieldsGet)
 }

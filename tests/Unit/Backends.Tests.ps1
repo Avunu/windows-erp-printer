@@ -48,27 +48,74 @@ BeforeAll {
 Describe 'OdooJson2 backend' {
     BeforeEach {
         Mock -ModuleName ErpPrinter Get-ErpDirectoryIdentity { @('john.doe@corp.example') }
-        InModuleScope ErpPrinter { $script:ErpUserCache.Clear(); $script:ErpEdiTypeCache.Clear() }
+        InModuleScope ErpPrinter { $script:ErpUserCache.Clear() }
     }
 
-    It 'creates a documents.document with folder and base64 content' {
+    It 'creates an ir.attachment with the file name and base64 content by default' {
         Set-HttpReplies @(@{ Status = 200; Body = '[42]' })
-        $id = Invoke-Backend Send (New-TestProfile OdooJson2 @{ OdooFolderId = 7; Database = 'prod' })
+        $id = Invoke-Backend Send (New-TestProfile OdooJson2 @{ Database = 'prod' })
         $id | Should -Be '42'
         $call = $script:Calls[0]
-        $call.Uri | Should -Be 'https://erp.example.com/json/2/documents.document/create'
+        $call.Uri | Should -Be 'https://erp.example.com/json/2/ir.attachment/create'
         $call.Headers.Authorization | Should -Be 'bearer key'
         $call.Headers['X-Odoo-Database'] | Should -Be 'prod'
         $vals = (ConvertFrom-Json $call.Body).vals_list[0]
+        @($vals.PSObject.Properties.Name) | Should -Be @('name', 'datas')
         $vals.name | Should -Be 'Invoice 7.pdf'
-        $vals.folder_id | Should -Be 7
         [Text.Encoding]::ASCII.GetString([Convert]::FromBase64String($vals.datas)) | Should -BeLike '%PDF*'
-        $vals.PSObject.Properties['owner_id'] | Should -BeNullOrEmpty
     }
 
-    It 'maps the Windows user to owner_id and caches the lookup' {
+    It 'creates a record in any model with its own field names and default values' {
+        Set-HttpReplies @(@{ Status = 200; Body = '[55]' })
+        $printerProfile = New-TestProfile OdooJson2 @{
+            OdooModel = 'edi.exchange.record'; OdooFileField = 'exchange_file'; OdooNameField = 'exchange_filename'
+            OdooDefaultValues = '{"backend_id": 3, "type_id": 8, "edi_exchange_state": "input_received"}'
+        }
+        Invoke-Backend Send $printerProfile | Should -Be '55'
+        $script:Calls.Count | Should -Be 1
+        $script:Calls[0].Uri | Should -BeLike '*/json/2/edi.exchange.record/create'
+        $vals = (ConvertFrom-Json $script:Calls[0].Body).vals_list[0]
+        $vals.backend_id | Should -Be 3
+        $vals.type_id | Should -Be 8
+        $vals.edi_exchange_state | Should -Be 'input_received'
+        $vals.exchange_filename | Should -Be 'Invoice 7.pdf'
+        [Text.Encoding]::ASCII.GetString([Convert]::FromBase64String($vals.exchange_file)) | Should -BeLike '%PDF*'
+        $vals.PSObject.Properties['name'] | Should -BeNullOrEmpty
+        $vals.PSObject.Properties['datas'] | Should -BeNullOrEmpty
+    }
+
+    It 'expands tokens in default values and passes nested JSON through' {
+        Set-HttpReplies @(@{ Status = 200; Body = '[5]' })
+        $printerProfile = New-TestProfile OdooJson2 @{
+            OdooDefaultValues = '{"description": "From {user} on {computer}", "public": false, "res_id": 3, "tag_ids": [[6, 0, [3]]]}'
+        }
+        Invoke-Backend Send $printerProfile | Should -Be '5'
+        $body = $script:Calls[0].Body
+        $vals = (ConvertFrom-Json $body).vals_list[0]
+        $vals.description | Should -Be 'From CORP\jdoe on PC-01'
+        $vals.public | Should -BeFalse
+        $vals.res_id | Should -Be 3
+        $body.Contains('"tag_ids":[[6,0,[3]]]') | Should -BeTrue
+    }
+
+    It 'lets default values override the file name but never the document' {
+        Set-HttpReplies @(@{ Status = 200; Body = '[6]' })
+        Invoke-Backend Send (New-TestProfile OdooJson2 @{ OdooDefaultValues = '{"name": "Fixed.pdf", "datas": "not a pdf"}' }) | Should -Be '6'
+        $vals = (ConvertFrom-Json $script:Calls[0].Body).vals_list[0]
+        $vals.name | Should -Be 'Fixed.pdf'
+        [Text.Encoding]::ASCII.GetString([Convert]::FromBase64String($vals.datas)) | Should -BeLike '%PDF*'
+    }
+
+    It 'sends no name when the name field is empty' {
+        Set-HttpReplies @(@{ Status = 200; Body = '[7]' })
+        Invoke-Backend Send (New-TestProfile OdooJson2 @{ OdooNameField = '' }) | Should -Be '7'
+        $vals = (ConvertFrom-Json $script:Calls[0].Body).vals_list[0]
+        @($vals.PSObject.Properties.Name) | Should -Be @('datas')
+    }
+
+    It 'maps the Windows user to the user field and caches the lookup' {
         Set-HttpReplies @(@{ Status = 200; Body = '[{"id": 9}]' }, @{ Status = 200; Body = '[1]' }, @{ Status = 200; Body = '[2]' })
-        $printerProfile = New-TestProfile OdooJson2 @{ UserMapping = $true; UserEmailDomain = 'corp.example' }
+        $printerProfile = New-TestProfile OdooJson2 @{ OdooModel = 'documents.document'; UserMapping = $true; UserEmailDomain = 'corp.example' }
         Invoke-Backend Send $printerProfile | Should -Be '1'
         Invoke-Backend Send $printerProfile | Should -Be '2'
         $script:Calls.Count | Should -Be 3
@@ -77,7 +124,22 @@ Describe 'OdooJson2 backend' {
         $search.domain[0] | Should -Be '|'
         $search.domain[1][2] | Should -Contain 'jdoe@corp.example'
         $search.domain[1][2] | Should -Contain 'john.doe@corp.example'
+        $script:Calls[1].Uri | Should -BeLike '*/json/2/documents.document/create'
         (ConvertFrom-Json $script:Calls[1].Body).vals_list[0].owner_id | Should -Be 9
+    }
+
+    It 'writes the mapped user to a custom user field' {
+        Set-HttpReplies @(@{ Status = 200; Body = '[{"id": 9}]' }, @{ Status = 200; Body = '[1]' })
+        Invoke-Backend Send (New-TestProfile OdooJson2 @{ UserMapping = $true; OdooUserField = 'user_id' }) | Should -Be '1'
+        $vals = (ConvertFrom-Json $script:Calls[1].Body).vals_list[0]
+        $vals.user_id | Should -Be 9
+        $vals.PSObject.Properties['owner_id'] | Should -BeNullOrEmpty
+    }
+
+    It 'does not look users up unless mapping is on' {
+        Set-HttpReplies @(@{ Status = 200; Body = '[1]' })
+        Invoke-Backend Send (New-TestProfile OdooJson2) | Should -Be '1'
+        $script:Calls.Count | Should -Be 1
     }
 
     It 'sends a single user candidate as a list' {
@@ -89,61 +151,21 @@ Describe 'OdooJson2 backend' {
         $script:Calls[0].Body | Should -BeLike '*["login","in",["jdoe"]]*'
     }
 
-    It 'attaches to a record with ir.attachment and merges extra fields' {
-        Set-HttpReplies @(@{ Status = 200; Body = '[5]' })
-        $printerProfile = New-TestProfile OdooJson2 @{ OdooModel = 'ir.attachment'; OdooResModel = 'res.partner'; OdooResId = 3; OdooExtraFields = '{"description": "From {user} on {computer}", "public": false}' }
-        Invoke-Backend Send $printerProfile | Should -Be '5'
-        $script:Calls[0].Uri | Should -BeLike '*/json/2/ir.attachment/create'
-        $vals = (ConvertFrom-Json $script:Calls[0].Body).vals_list[0]
-        $vals.res_model | Should -Be 'res.partner'
-        $vals.res_id | Should -Be 3
-        $vals.mimetype | Should -Be 'application/pdf'
-        $vals.description | Should -Be 'From CORP\jdoe on PC-01'
-        $vals.public | Should -BeFalse
+    It 'fails permanently, without calling Odoo, when the default values are not a JSON object' {
+        Set-HttpReplies @()
+        $caught = $null
+        try { Invoke-Backend Send (New-TestProfile OdooJson2 @{ OdooDefaultValues = '{"partner_id": {id}}' }) } catch { $caught = $_ }
+        $caught.Exception.Message | Should -BeLike '*Default values are not a valid JSON object*'
+        InModuleScope ErpPrinter -Parameters @{ E = $caught } { param($E) Test-ErpPermanentError $E } | Should -BeTrue
+        $script:Calls.Count | Should -Be 0
     }
 
-    It 'creates a received edi.exchange.record, preferring the type pinned to the backend' {
-        Set-HttpReplies @(
-            @{ Status = 200; Body = '[{"id": 3, "backend_type_id": [2, "PDF import"]}]' }
-            @{ Status = 200; Body = '[{"id": 8, "backend_id": false, "direction": "input"}, {"id": 9, "backend_id": [3, "Printers"], "direction": "input"}]' }
-            @{ Status = 200; Body = '[55]' }
-            @{ Status = 200; Body = '[56]' }
-        )
-        $printerProfile = New-TestProfile OdooJson2 @{ OdooModel = 'edi.exchange.record'; OdooEdiBackendId = 3; OdooEdiExchangeType = 'printed_po' }
-        Invoke-Backend Send $printerProfile | Should -Be '55'
-        Invoke-Backend Send $printerProfile | Should -Be '56'
-        $script:Calls.Count | Should -Be 4
-        $script:Calls[0].Uri | Should -BeLike '*/json/2/edi.backend/search_read'
-        $typeSearch = ConvertFrom-Json $script:Calls[1].Body
-        $script:Calls[1].Uri | Should -BeLike '*/json/2/edi.exchange.type/search_read'
-        $typeSearch.domain[0] | Should -Be @('code', '=', 'printed_po')
-        $typeSearch.domain[5] | Should -Be @('backend_type_id', '=', 2)
-        $script:Calls[2].Uri | Should -BeLike '*/json/2/edi.exchange.record/create'
-        $vals = (ConvertFrom-Json $script:Calls[2].Body).vals_list[0]
-        $vals.backend_id | Should -Be 3
-        $vals.type_id | Should -Be 9
-        $vals.edi_exchange_state | Should -Be 'input_received'
-        $vals.exchange_filename | Should -Be 'Invoice 7.pdf'
-        [Text.Encoding]::ASCII.GetString([Convert]::FromBase64String($vals.exchange_file)) | Should -BeLike '%PDF*'
-        $vals.PSObject.Properties['name'] | Should -BeNullOrEmpty
-        $vals.PSObject.Properties['datas'] | Should -BeNullOrEmpty
-    }
-
-    It 'refuses an EDI exchange type that is <Case>' -TestCases @(
-        @{ Case = 'missing'; Types = '[]'; Expected = "*No EDI exchange type with code 'printed_po' on backend #3*" }
-        @{ Case = 'an output type'; Types = '[{"id": 8, "backend_id": false, "direction": "output"}]'; Expected = '*is an output type*' }
-    ) {
-        param($Types, $Expected)
-        Set-HttpReplies @(@{ Status = 200; Body = '[{"id": 3, "backend_type_id": [2, "PDF import"]}]' }, @{ Status = 200; Body = $Types })
-        $printerProfile = New-TestProfile OdooJson2 @{ OdooModel = 'edi.exchange.record'; OdooEdiBackendId = 3; OdooEdiExchangeType = 'printed_po' }
-        { Invoke-Backend Send $printerProfile } | Should -Throw $Expected
-        $script:Calls.Count | Should -Be 2
-    }
-
-    It 'reports a missing EDI backend' {
-        Set-HttpReplies @(@{ Status = 200; Body = '[]' })
-        $printerProfile = New-TestProfile OdooJson2 @{ OdooModel = 'edi.exchange.record'; OdooEdiBackendId = 3; OdooEdiExchangeType = 'printed_po' }
-        { Invoke-Backend Send $printerProfile } | Should -Throw '*EDI backend #3 does not exist*'
+    It 'fails permanently when the profile has no file field' {
+        Set-HttpReplies @()
+        $caught = $null
+        try { Invoke-Backend Send (New-TestProfile OdooJson2 @{ OdooFileField = '' }) } catch { $caught = $_ }
+        $caught.Exception.Message | Should -BeLike '*no File field*'
+        InModuleScope ErpPrinter -Parameters @{ E = $caught } { param($E) Test-ErpPermanentError $E } | Should -BeTrue
     }
 
     It 'explains a missing JSON-2 endpoint' {
@@ -151,17 +173,38 @@ Describe 'OdooJson2 backend' {
         { Invoke-Backend Send (New-TestProfile OdooJson2) } | Should -Throw '*OdooJsonRpc backend*'
     }
 
-    It 'tests the connection with search_count' {
-        Set-HttpReplies @(@{ Status = 200; Body = '12' })
-        Invoke-Backend Test (New-TestProfile OdooJson2) | Should -BeLike '*12 documents.document*'
+    It 'tests the connection with search_count, then checks the fields with fields_get' {
+        Set-HttpReplies @(@{ Status = 200; Body = '12' }, @{ Status = 200; Body = '{"datas": {"type": "binary"}, "name": {"type": "char"}, "folder_id": {"type": "many2one"}}' })
+        $printerProfile = New-TestProfile OdooJson2 @{ OdooModel = 'documents.document'; OdooDefaultValues = '{"folder_id": 7}' }
+        Invoke-Backend Test $printerProfile | Should -Be 'Connected to Odoo (JSON-2). The API user can see 12 documents.document records. Fields found: datas, name, folder_id.'
         $script:Calls[0].Uri | Should -BeLike '*/documents.document/search_count'
+        $script:Calls[1].Uri | Should -BeLike '*/documents.document/fields_get'
+        $fieldsGet = ConvertFrom-Json $script:Calls[1].Body
+        $fieldsGet.allfields | Should -Be @('datas', 'name', 'folder_id')
+        $fieldsGet.attributes | Should -Be @('type')
+    }
+
+    It 'includes the user field in the field check only when users are mapped' {
+        Set-HttpReplies @(@{ Status = 200; Body = '1' }, @{ Status = 200; Body = '{"datas": {"type": "binary"}, "name": {"type": "char"}, "owner_id": {"type": "many2one"}}' })
+        Invoke-Backend Test (New-TestProfile OdooJson2 @{ UserMapping = $true }) | Should -BeLike '*Fields found: datas, name, owner_id.'
+    }
+
+    It 'reports fields the model does not have' {
+        Set-HttpReplies @(@{ Status = 200; Body = '1' }, @{ Status = 200; Body = '{"datas": {"type": "binary"}}' })
+        { Invoke-Backend Test (New-TestProfile OdooJson2 @{ OdooDefaultValues = '{"folder_id": 7, "nope": 1}' }) } |
+            Should -Throw '*Model ir.attachment has no field named name, folder_id, nope.'
+    }
+
+    It 'requires the file field to be binary' {
+        Set-HttpReplies @(@{ Status = 200; Body = '1' }, @{ Status = 200; Body = '{"datas": {"type": "char"}, "name": {"type": "char"}}' })
+        { Invoke-Backend Test (New-TestProfile OdooJson2) } | Should -Throw '*datas is of type char; it must be a binary field*'
     }
 }
 
 Describe 'OdooJsonRpc backend' {
     BeforeEach {
         Mock -ModuleName ErpPrinter Get-ErpDirectoryIdentity { @() }
-        InModuleScope ErpPrinter { $script:ErpOdooSessions.Clear(); $script:ErpEdiTypeCache.Clear() }
+        InModuleScope ErpPrinter { $script:ErpOdooSessions.Clear() }
     }
 
     It 'authenticates, then creates through execute_kw' {
@@ -169,7 +212,7 @@ Describe 'OdooJsonRpc backend' {
             @{ Status = 200; Body = '{"jsonrpc": "2.0", "id": 1, "result": 6}' }
             @{ Status = 200; Body = '{"jsonrpc": "2.0", "id": 2, "result": 77}' }
         )
-        $printerProfile = New-TestProfile OdooJsonRpc @{ Database = 'prod'; Username = 'api@corp.example'; OdooFolderId = 4 }
+        $printerProfile = New-TestProfile OdooJsonRpc @{ Database = 'prod'; Username = 'api@corp.example'; OdooModel = 'documents.document'; OdooDefaultValues = '{"folder_id": 4}' }
         Invoke-Backend Send $printerProfile | Should -Be '77'
         $auth = ConvertFrom-Json $script:Calls[0].Body
         $auth.params.service | Should -Be 'common'
@@ -180,36 +223,43 @@ Describe 'OdooJsonRpc backend' {
         $create.params.args[1] | Should -Be 6
         $create.params.args[3] | Should -Be 'documents.document'
         $create.params.args[4] | Should -Be 'create'
+        $create.params.args[5][0].name | Should -Be 'Invoice 7.pdf'
         $create.params.args[5][0].folder_id | Should -Be 4
     }
 
-    It 'resolves the EDI exchange type through search_read, then creates the record' {
+    It 'creates a record in any model with its own field names' {
         Set-HttpReplies @(
             @{ Status = 200; Body = '{"result": 6}' }
-            @{ Status = 200; Body = '{"result": [{"id": 3, "backend_type_id": [2, "PDF import"]}]}' }
-            @{ Status = 200; Body = '{"result": [{"id": 8, "backend_id": false, "direction": "input"}]}' }
             @{ Status = 200; Body = '{"result": 91}' }
         )
-        $printerProfile = New-TestProfile OdooJsonRpc @{ Database = 'prod'; Username = 'api'; OdooModel = 'edi.exchange.record'; OdooEdiBackendId = 3; OdooEdiExchangeType = 'printed_po' }
+        $printerProfile = New-TestProfile OdooJsonRpc @{
+            Database = 'prod'; Username = 'api'; OdooModel = 'edi.exchange.record'; OdooFileField = 'exchange_file'; OdooNameField = 'exchange_filename'
+            OdooDefaultValues = '{"backend_id": 3, "type_id": 8, "edi_exchange_state": "input_received"}'
+        }
         Invoke-Backend Send $printerProfile | Should -Be '91'
-        $backendSearch = (ConvertFrom-Json $script:Calls[1].Body).params.args
-        $backendSearch[3..4] | Should -Be @('edi.backend', 'search_read')
-        $backendSearch[6].fields | Should -Be @('backend_type_id')
-        $create = (ConvertFrom-Json $script:Calls[3].Body).params.args
+        $create = (ConvertFrom-Json $script:Calls[1].Body).params.args
         $create[3..4] | Should -Be @('edi.exchange.record', 'create')
         $create[5][0].type_id | Should -Be 8
         $create[5][0].edi_exchange_state | Should -Be 'input_received'
+        $create[5][0].exchange_filename | Should -Be 'Invoice 7.pdf'
+        [Text.Encoding]::ASCII.GetString([Convert]::FromBase64String($create[5][0].exchange_file)) | Should -BeLike '%PDF*'
     }
 
-    It 'names the EDI exchange type in the connection test' {
+    It 'checks the fields through fields_get in the connection test' {
         Set-HttpReplies @(
             @{ Status = 200; Body = '{"result": 6}' }
             @{ Status = 200; Body = '{"result": 4}' }
-            @{ Status = 200; Body = '{"result": [{"id": 3, "backend_type_id": [2, "PDF import"]}]}' }
-            @{ Status = 200; Body = '{"result": [{"id": 8, "backend_id": false, "direction": "input"}]}' }
+            @{ Status = 200; Body = '{"result": {"exchange_file": {"type": "binary"}, "exchange_filename": {"type": "char"}, "backend_id": {"type": "many2one"}}}' }
         )
-        $printerProfile = New-TestProfile OdooJsonRpc @{ Database = 'prod'; Username = 'api'; OdooModel = 'edi.exchange.record'; OdooEdiBackendId = 3; OdooEdiExchangeType = 'printed_po' }
-        Invoke-Backend Test $printerProfile | Should -BeLike "*4 edi.exchange.record records. Exchange type 'printed_po' is #8 on EDI backend #3."
+        $printerProfile = New-TestProfile OdooJsonRpc @{
+            Database = 'prod'; Username = 'api'; OdooModel = 'edi.exchange.record'; OdooFileField = 'exchange_file'; OdooNameField = 'exchange_filename'
+            OdooDefaultValues = '{"backend_id": 3}'
+        }
+        Invoke-Backend Test $printerProfile | Should -BeLike "*4 edi.exchange.record records. Fields found: exchange_file, exchange_filename, backend_id."
+        $fieldsGet = (ConvertFrom-Json $script:Calls[2].Body).params.args
+        $fieldsGet[3..4] | Should -Be @('edi.exchange.record', 'fields_get')
+        $fieldsGet[5][0] | Should -Be @('exchange_file', 'exchange_filename', 'backend_id')
+        $fieldsGet[6].attributes | Should -Be @('type')
     }
 
     It 'discovers the database when the server has exactly one' {
@@ -217,6 +267,7 @@ Describe 'OdooJsonRpc backend' {
             @{ Status = 200; Body = '{"result": ["only"]}' }
             @{ Status = 200; Body = '{"result": 6}' }
             @{ Status = 200; Body = '{"result": 3}' }
+            @{ Status = 200; Body = '{"result": {"datas": {"type": "binary"}, "name": {"type": "char"}}}' }
         )
         Invoke-Backend Test (New-TestProfile OdooJsonRpc @{ Username = 'api' }) | Should -BeLike "*database 'only' as uid 6*"
     }
