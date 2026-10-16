@@ -1,6 +1,6 @@
-# ERP Printer
+# Windows ERP Printer
 
-Virtual printers for Windows that deliver whatever you print straight into your ERP: Odoo (Documents, any record's attachments, or OCA EDI exchange records), ERPNext / Frappe, or any HTTP endpoint through a webhook.
+Virtual printers for Windows that deliver whatever you print straight into your ERP: Odoo (any model you can create records in: attachments, Documents, OCA EDI exchange records or your own), ERPNext / Frappe, or any HTTP endpoint through a webhook.
 
 Users pick a printer such as **Send to Odoo** in any application's print dialog. The job becomes a PDF, is queued locally, and is uploaded in the background with the Windows user and document title attached. If the ERP is unreachable, documents wait in the outbox and are retried; nothing is lost.
 
@@ -30,7 +30,7 @@ It is a thin layer over what Windows already has: the inbox **Microsoft Print to
     -   `ERPNext`: Frappe `upload_file`, optionally attached to a document.
     -   `Webhook`: multipart or JSON POST to any URL, such as n8n, Power Automate or Paperless-ngx.
 -   **Reliable delivery.** A local outbox with atomic writes, exponential backoff, permanent-vs-transient error classification, a failed folder with one-click retry, and optional archiving of sent files.
--   **User attribution.** The Windows user and document title travel with every document. Odoo profiles can map Windows users to Odoo users (login, email, or AD mail/UPN) and set `owner_id`.
+-   **User attribution.** The Windows user and document title travel with every document. Odoo profiles can map Windows users to Odoo users (login, email, or AD mail/UPN) and write the match to a field of your choice, such as `owner_id`.
 -   **Registry-based configuration** with a Group Policy override layer, generated ADMX templates, and DPAPI-encrypted secrets in an ACL'd key.
 -   **Configuration GUI** (Windows Forms, launched from the Start menu). It is generated from the settings schema, respects policy-locked values, tests connections, prints test pages and shows queue status.
 -   **MSI installer** (WiX v5) that supports silent install and pre-seeding a printer profile from MSI properties, for Intune, GPO, SCCM or RMM.
@@ -72,7 +72,7 @@ msiexec /i ErpPrinter-1.0.0-x64.msi /qn `
 
 Uninstall with `msiexec /x ErpPrinter-1.0.0-x64.msi /qn`. Printers and tasks are removed. Configuration and any undelivered documents stay unless you pass `PURGE=1`.
 
-For Intune, Group Policy, and destination-specific setup (Odoo API keys, ERPNext tokens, Documents folders, webhooks), see [docs/deployment.md](docs/deployment.md) and [docs/backends.md](docs/backends.md).
+For Intune, Group Policy, and destination-specific setup (Odoo models and default values, ERPNext tokens, webhooks), see [docs/deployment.md](docs/deployment.md) and [docs/backends.md](docs/backends.md).
 
 ## Configure
 

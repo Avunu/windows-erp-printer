@@ -84,6 +84,15 @@ Describe 'Set-ErpPrinterSetting' {
         $script:FakeRegistry[$script:Root].ContainsKey('PollIntervalSeconds') | Should -BeFalse
     }
 
+    It 'stores an empty File name field explicitly so it overrides the default' {
+        Set-ErpPrinterSetting -ProfileName 'P1' -Name OdooNameField -Value ''
+        $script:FakeRegistry["$script:Root\Printers\P1"].ContainsKey('OdooNameField') | Should -BeTrue
+        (Get-ErpPrinterProfile -Name 'P1').OdooNameField | Should -Be ''
+        Set-ErpPrinterSetting -ProfileName 'P1' -Name OdooNameField -Value 'name'
+        $script:FakeRegistry["$script:Root\Printers\P1"].ContainsKey('OdooNameField') | Should -BeFalse
+        (Get-ErpPrinterProfile -Name 'P1').OdooNameField | Should -Be 'name'
+    }
+
     It 'always stores the backend of a profile explicitly' {
         Set-ErpPrinterSetting -ProfileName 'P1' -Name Backend -Value 'OdooJson2'
         $script:FakeRegistry["$script:Root\Printers\P1"].Backend | Should -Be 'OdooJson2'
@@ -112,10 +121,11 @@ Describe 'Printer profiles and secrets' {
     BeforeEach { Initialize-FakeRegistry }
 
     It 'creates a profile with settings and encrypted secrets' {
-        New-ErpPrinterProfile -Name 'Send to Odoo' -Settings @{ ServerUrl = 'https://acme.odoo.com'; OdooFolderId = 7; ApiKey = 's3cret' }
+        New-ErpPrinterProfile -Name 'Send to Odoo' -Settings @{ ServerUrl = 'https://acme.odoo.com'; OdooModel = 'documents.document'; OdooDefaultValues = '{"folder_id": 7}'; ApiKey = 's3cret' }
         $key = "$script:Root\Printers\Send to Odoo"
         $script:FakeRegistry[$key].ServerUrl | Should -Be 'https://acme.odoo.com'
-        $script:FakeRegistry[$key].OdooFolderId | Should -Be 7
+        $script:FakeRegistry[$key].OdooModel | Should -Be 'documents.document'
+        $script:FakeRegistry[$key].OdooDefaultValues | Should -Be '{"folder_id": 7}'
         $script:FakeRegistry[$key].Backend | Should -Be 'OdooJson2'
         $script:FakeRegistry[$key].ContainsKey('ApiKey') | Should -BeFalse
         $script:FakeKinds["$script:Root\Secrets\Send to Odoo|ApiKey"] | Should -Be 'Binary'
@@ -182,14 +192,31 @@ Describe 'Test-ErpPrinterProfile' {
         @{ Case = 'missing API key'; Overrides = @{}; Secrets = @{}; Expected = '*API key is required*' }
         @{ Case = 'ERPNext without secret'; Overrides = @{ Backend = 'ERPNext' }; Secrets = @{ ApiKey = 'k' }; Expected = '*API secret*' }
         @{ Case = 'JSON-RPC without login'; Overrides = @{ Backend = 'OdooJsonRpc' }; Secrets = @{ ApiKey = 'k' }; Expected = '*login*' }
-        @{ Case = 'bad extra fields'; Overrides = @{ OdooExtraFields = '{nope' }; Secrets = @{ ApiKey = 'k' }; Expected = '*JSON object*' }
-        @{ Case = 'half an attachment target'; Overrides = @{ OdooModel = 'ir.attachment'; OdooResModel = 'res.partner' }; Secrets = @{ ApiKey = 'k' }; Expected = '*Attach to model*' }
-        @{ Case = 'an EDI target without an exchange type'; Overrides = @{ OdooModel = 'edi.exchange.record'; OdooEdiBackendId = 3 }; Secrets = @{ ApiKey = 'k' }; Expected = '*EDI exchange type code*' }
+        @{ Case = 'malformed default values'; Overrides = @{ OdooDefaultValues = '{nope' }; Secrets = @{ ApiKey = 'k' }; Expected = '*Default values are not a valid JSON object*' }
+        @{ Case = 'default values that are an array'; Overrides = @{ OdooDefaultValues = '[{"a": 1}]' }; Secrets = @{ ApiKey = 'k' }; Expected = '*Default values are not a valid JSON object*' }
+        @{ Case = 'a model that is not a technical name'; Overrides = @{ OdooModel = 'Edi Router' }; Secrets = @{ ApiKey = 'k' }; Expected = '*technical model name*' }
+        @{ Case = 'a model that would leave the endpoint path'; Overrides = @{ OdooModel = 'res.partner/../x' }; Secrets = @{ ApiKey = 'k' }; Expected = '*technical model name*' }
+        @{ Case = 'no model'; Overrides = @{ OdooModel = '' }; Secrets = @{ ApiKey = 'k' }; Expected = '*technical model name*' }
+        @{ Case = 'no file field'; Overrides = @{ OdooFileField = '' }; Secrets = @{ ApiKey = 'k' }; Expected = '*File field*' }
+        @{ Case = 'a bad file name field'; Overrides = @{ OdooNameField = 'na me' }; Secrets = @{ ApiKey = 'k' }; Expected = '*File name field*' }
+        @{ Case = 'user mapping without a user field'; Overrides = @{ UserMapping = $true; OdooUserField = '' }; Secrets = @{ ApiKey = 'k' }; Expected = '*User field*' }
         @{ Case = 'bad pipe name'; Overrides = @{ PipeName = 'a b' }; Secrets = @{ ApiKey = 'k' }; Expected = '*Pipe name*' }
     ) {
         param($Overrides, $Secrets, $Expected)
         $problems = Test-ErpPrinterProfile -PrinterProfile (New-Candidate $Overrides) -Secrets $Secrets
         ($problems -join "`n") | Should -BeLike $Expected
+    }
+
+    It 'accepts any model with its own fields and JSON default values containing tokens' {
+        $overrides = @{
+            OdooModel = 'x_edi.import.router.document'; OdooFileField = 'x_file'; OdooNameField = ''
+            OdooDefaultValues = '{"router_id": 1, "note": "From {user}", "tag_ids": [[6, 0, [3]]]}'
+        }
+        Test-ErpPrinterProfile -PrinterProfile (New-Candidate $overrides) -Secrets @{ ApiKey = 'k' } | Should -BeNullOrEmpty
+    }
+
+    It 'does not check the user field while users are not mapped' {
+        Test-ErpPrinterProfile -PrinterProfile (New-Candidate @{ OdooUserField = '' }) -Secrets @{ ApiKey = 'k' } | Should -BeNullOrEmpty
     }
 
     It 'allows a webhook without a key' {

@@ -72,6 +72,17 @@ function Expand-ErpTemplate {
         }.GetNewClosure())
 }
 
+function ConvertFrom-ErpJsonObject {
+    <# Parses a JSON object. Throws a short reason for arrays, scalars and malformed text. #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)] [AllowEmptyString()] [string] $Text)
+    # ConvertFrom-Json unrolls a one-element array into its element, so check the first character as well.
+    if ($Text.TrimStart() -notlike '{*') { throw 'the text does not start with {.' }
+    try { ConvertFrom-Json $Text -ErrorAction Stop }
+    catch { throw $_.Exception.Message }
+}
+
 function Get-ErpDocumentFileName {
     <# Builds a safe "<name>.pdf" from the profile's FileNameTemplate. #>
     [CmdletBinding()]

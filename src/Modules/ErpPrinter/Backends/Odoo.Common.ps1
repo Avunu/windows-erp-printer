@@ -1,111 +1,65 @@
 # Shared by the OdooJson2 and OdooJsonRpc backends.
 
 $script:ErpUserCache = @{}
-$script:ErpEdiTypeCache = @{}
 
 function Get-ErpOdooVals {
-    <# Builds the create() values. The binary field holds the payload placeholder that is replaced with base64 at send time. #>
+    <#
+    Builds the create() values, the way an Odoo mail alias builds a record: the file name and
+    the mapped user first, then the profile's default values on top. The file field comes last
+    and holds the payload placeholder that is replaced with base64 at send time.
+    #>
     [CmdletBinding()]
     [OutputType([System.Collections.Specialized.OrderedDictionary])]
     param(
         [Parameter(Mandatory)] [System.Collections.IDictionary] $PrinterProfile,
         [Parameter(Mandatory)] $Meta,
         [Parameter(Mandatory)] [string] $FileName,
-        [int] $OwnerId = 0,
-        [int] $ExchangeTypeId = 0
+        [int] $OwnerId = 0
     )
-    switch ($PrinterProfile.OdooModel) {
-        'edi.exchange.record' {
-            # The whole document has already arrived, so the record starts as received: the
-            # backend's process cron (or quick_exec, during create) picks it up from there.
-            $vals = [ordered]@{
-                backend_id         = [int]$PrinterProfile.OdooEdiBackendId
-                type_id            = $ExchangeTypeId
-                exchange_filename  = $FileName
-                exchange_file      = '@@ERP_PAYLOAD@@'
-                edi_exchange_state = 'input_received'
-            }
-        }
-        'ir.attachment' {
-            $vals = [ordered]@{ name = $FileName; datas = '@@ERP_PAYLOAD@@' }
-            $vals['mimetype'] = 'application/pdf'
-            if ($PrinterProfile.OdooResModel -and $PrinterProfile.OdooResId) {
-                $vals['res_model'] = $PrinterProfile.OdooResModel
-                $vals['res_id'] = [int]$PrinterProfile.OdooResId
-            }
-            $vals['description'] = "Printed by $($Meta.user) on $($Meta.computer)"
-        }
-        default {
-            $vals = [ordered]@{ name = $FileName; datas = '@@ERP_PAYLOAD@@' }
-            if ($PrinterProfile.OdooFolderId -gt 0) { $vals['folder_id'] = [int]$PrinterProfile.OdooFolderId }
-            if ($OwnerId -gt 0) { $vals['owner_id'] = $OwnerId }
-        }
+    if (-not $PrinterProfile.OdooFileField) { throw (New-ErpException 'The profile has no File field to put the document in.' -Permanent) }
+    $vals = [ordered]@{}
+    if ($PrinterProfile.OdooNameField) { $vals[$PrinterProfile.OdooNameField] = $FileName }
+    if ($OwnerId -gt 0 -and $PrinterProfile.OdooUserField) { $vals[$PrinterProfile.OdooUserField] = $OwnerId }
+    if ($PrinterProfile.OdooDefaultValues) {
+        $expanded = Expand-ErpTemplate -Template $PrinterProfile.OdooDefaultValues -Tokens (Get-ErpTemplateTokens $Meta) -JsonEscape
+        try { $defaults = ConvertFrom-ErpJsonObject $expanded }
+        catch { throw (New-ErpException "Default values are not a valid JSON object: $($_.Exception.Message)" -Permanent) }
+        foreach ($property in $defaults.PSObject.Properties) { $vals[$property.Name] = $property.Value }
     }
-    if ($PrinterProfile.OdooExtraFields) {
-        $expanded = Expand-ErpTemplate -Template $PrinterProfile.OdooExtraFields -Tokens (Get-ErpTemplateTokens $Meta) -JsonEscape
-        try { $extra = ConvertFrom-Json $expanded -ErrorAction Stop }
-        catch { throw (New-ErpException "Extra fields are not valid JSON: $($_.Exception.Message)" -Permanent) }
-        foreach ($property in $extra.PSObject.Properties) { $vals[$property.Name] = $property.Value }
-    }
+    $vals[$PrinterProfile.OdooFileField] = '@@ERP_PAYLOAD@@'
     $vals
 }
 
-function Resolve-ErpOdooEdiExchangeTypeId {
+function Get-ErpOdooFieldCheckMessage {
     <#
-    Finds the edi.exchange.type for the profile's code the way edi.backend.create_record()
-    does: a type pinned to the backend wins over one shared by its backend type. Hits are
-    cached for an hour. $SearchRead is a backend-specific scriptblock:
-    param($model, $domain, $fields) -> records. Returns 0 for other Odoo models.
+    For Test connection: confirms the model has every field the profile writes and that the file
+    field is binary, so a typo shows up now and not on the first printed document.
+    $FieldsGet is a backend-specific scriptblock: param($model, $fieldNames) -> field definitions by name.
     #>
-    [CmdletBinding()]
-    [OutputType([int])]
-    param(
-        [Parameter(Mandatory)] [System.Collections.IDictionary] $PrinterProfile,
-        [Parameter(Mandatory)] [scriptblock] $SearchRead
-    )
-    if ($PrinterProfile.OdooModel -ne 'edi.exchange.record') { return 0 }
-    $backendId = [int]$PrinterProfile.OdooEdiBackendId
-    $code = [string]$PrinterProfile.OdooEdiExchangeType
-    $cacheKey = "$($PrinterProfile.ServerUrl)|$($PrinterProfile.Database)|$backendId|$code".ToLowerInvariant()
-    $cached = $script:ErpEdiTypeCache[$cacheKey]
-    if ($cached -and $cached.Expires -gt (Get-Date)) { return $cached.Id }
-
-    $backend = @(& $SearchRead 'edi.backend' @(, @('id', '=', $backendId)) @('backend_type_id')) | Select-Object -First 1
-    if (-not $backend) { throw (New-ErpException "EDI backend #$backendId does not exist, is archived, or the API user cannot read it.") }
-    $backendTypeId = ConvertFrom-ErpOdooMany2one $backend.backend_type_id
-    $domain = @(@('code', '=', $code), '|', @('backend_id', '=', $backendId), '&', @('backend_id', '=', $false), @('backend_type_id', '=', $backendTypeId))
-    $types = @(& $SearchRead 'edi.exchange.type' $domain @('backend_id', 'direction'))
-    $type = @($types | Where-Object { ConvertFrom-ErpOdooMany2one $_.backend_id }) + $types | Select-Object -First 1
-    if (-not $type) { throw (New-ErpException "No EDI exchange type with code '$code' on backend #$backendId.") }
-    if ($type.direction -ne 'input') { throw (New-ErpException "EDI exchange type '$code' is an $($type.direction) type; printed documents need an input type.") }
-    $id = [int]$type.id
-    $script:ErpEdiTypeCache[$cacheKey] = @{ Id = $id; Expires = (Get-Date).AddHours(1) }
-    $id
-}
-
-function Get-ErpOdooEdiTestMessage {
-    <# For Test connection: resolves the exchange type afresh and describes it, or returns '' for other models. #>
     [CmdletBinding()]
     [OutputType([string])]
     param(
         [Parameter(Mandatory)] [System.Collections.IDictionary] $PrinterProfile,
-        [Parameter(Mandatory)] [scriptblock] $SearchRead
+        [Parameter(Mandatory)] [scriptblock] $FieldsGet
     )
-    if ($PrinterProfile.OdooModel -ne 'edi.exchange.record') { return '' }
-    $script:ErpEdiTypeCache.Clear()
-    $id = Resolve-ErpOdooEdiExchangeTypeId -PrinterProfile $PrinterProfile -SearchRead $SearchRead
-    " Exchange type '$($PrinterProfile.OdooEdiExchangeType)' is #$id on EDI backend #$($PrinterProfile.OdooEdiBackendId)."
-}
-
-function ConvertFrom-ErpOdooMany2one {
-    <# read() returns many2one values as [id, name], false when empty, or (JSON-2 specification reads) {id: ...}. #>
-    [CmdletBinding()]
-    [OutputType([int])]
-    param([AllowNull()] $Value)
-    if (-not $Value) { return 0 }
-    if ($Value -is [array]) { return [int]$Value[0] }
-    if ($Value.PSObject.Properties['id']) { return [int]$Value.id }
-    [int]$Value
+    $names = New-Object System.Collections.Generic.List[string]
+    $names.Add($PrinterProfile.OdooFileField)
+    if ($PrinterProfile.OdooNameField) { $names.Add($PrinterProfile.OdooNameField) }
+    if ($PrinterProfile.UserMapping -and $PrinterProfile.OdooUserField) { $names.Add($PrinterProfile.OdooUserField) }
+    if ($PrinterProfile.OdooDefaultValues) {
+        foreach ($property in (ConvertFrom-ErpJsonObject $PrinterProfile.OdooDefaultValues).PSObject.Properties) { $names.Add($property.Name) }
+    }
+    $names = @($names | Select-Object -Unique)
+    $known = & $FieldsGet $PrinterProfile.OdooModel $names
+    $missing = @($names | Where-Object { -not $known -or -not $known.PSObject.Properties[$_] })
+    if ($missing.Count) {
+        throw (New-ErpException "Model $($PrinterProfile.OdooModel) has no field named $($missing -join ', ').")
+    }
+    $fileType = $known.PSObject.Properties[$PrinterProfile.OdooFileField].Value.type
+    if ($fileType -ne 'binary') {
+        throw (New-ErpException "File field $($PrinterProfile.OdooFileField) is of type $fileType; it must be a binary field.")
+    }
+    " Fields found: $($names -join ', ')."
 }
 
 function Get-ErpUserIdentityCandidates {
@@ -161,7 +115,7 @@ function Resolve-ErpOdooOwnerId {
         [Parameter(Mandatory)] $Meta,
         [Parameter(Mandatory)] [scriptblock] $SearchUser
     )
-    if (-not $PrinterProfile.UserMapping -or $PrinterProfile.OdooModel -ne 'documents.document' -or -not $Meta.user) { return 0 }
+    if (-not $PrinterProfile.UserMapping -or -not $PrinterProfile.OdooUserField -or -not $Meta.user) { return 0 }
     $cacheKey = "$($PrinterProfile.Name)|$($Meta.user)".ToLowerInvariant()
     $cached = $script:ErpUserCache[$cacheKey]
     if ($cached -and $cached.Expires -gt (Get-Date)) { return $cached.Id }
