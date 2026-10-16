@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/Avunu/windows-erp-printer/compare/v0.2.0...v0.3.0) (2026-10-16)
+
+
+### Miscellaneous Chores
+
+* trigger 0.3.0 release ([75faedd](https://github.com/Avunu/windows-erp-printer/commit/75faedde5de136fb8bb125c17a6e9622ee85ede4))
+
 ## [0.2.0](https://github.com/Avunu/windows-erp-printer/compare/v0.1.0...v0.2.0) (2026-10-16)
 
 
