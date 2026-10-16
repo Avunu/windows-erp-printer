@@ -255,6 +255,9 @@ function Test-ErpPrinterProfile {
         if ($PrinterProfile.OdooModel -eq 'ir.attachment' -and [bool]$PrinterProfile.OdooResModel -ne [bool]$PrinterProfile.OdooResId) {
             $problems.Add('Set both "Attach to model" and "Attach to record ID", or neither.')
         }
+        if ($PrinterProfile.OdooModel -eq 'edi.exchange.record' -and ($PrinterProfile.OdooEdiBackendId -le 0 -or -not $PrinterProfile.OdooEdiExchangeType)) {
+            $problems.Add('edi.exchange.record needs "EDI backend ID" and "EDI exchange type code".')
+        }
         if ($PrinterProfile.OdooExtraFields) {
             try { $null = ConvertFrom-Json $PrinterProfile.OdooExtraFields -ErrorAction Stop }
             catch { $problems.Add('Extra fields must be a JSON object.') }

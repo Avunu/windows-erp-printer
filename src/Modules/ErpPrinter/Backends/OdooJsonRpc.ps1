@@ -98,13 +98,18 @@ function Send-ErpOdooJsonRpcDocument {
         [Parameter(Mandatory)] [hashtable] $Secrets
     )
     $common = @{ PrinterProfile = $PrinterProfile; GlobalSettings = $GlobalSettings; Secrets = $Secrets }
+    $searchRead = {
+        param($model, $domain, $fields)
+        Invoke-ErpOdooExecuteKw @common -Model $model -Method 'search_read' -Positional @(, $domain) -Keyword @{ fields = $fields }
+    }
     $ownerId = Resolve-ErpOdooOwnerId -PrinterProfile $PrinterProfile -Meta $Meta -SearchUser {
         param($domain)
         $users = Invoke-ErpOdooExecuteKw @common -Model 'res.users' -Method 'search_read' -Positional @(, $domain) -Keyword @{ fields = @('id'); limit = 1 }
         $first = @($users) | Select-Object -First 1
         if ($first) { $first.id }
     }
-    $vals = Get-ErpOdooVals -PrinterProfile $PrinterProfile -Meta $Meta -FileName $FileName -OwnerId $ownerId
+    $typeId = Resolve-ErpOdooEdiExchangeTypeId -PrinterProfile $PrinterProfile -SearchRead $searchRead
+    $vals = Get-ErpOdooVals -PrinterProfile $PrinterProfile -Meta $Meta -FileName $FileName -OwnerId $ownerId -ExchangeTypeId $typeId
     $id = Invoke-ErpOdooExecuteKw @common -Model $PrinterProfile.OdooModel -Method 'create' -Positional @(, $vals) -PayloadPath $PdfPath
     [string](@($id) | Select-Object -First 1)
 }
@@ -117,8 +122,13 @@ function Test-ErpOdooJsonRpcConnection {
         [System.Collections.IDictionary] $GlobalSettings = @{},
         [Parameter(Mandatory)] [hashtable] $Secrets
     )
+    $common = @{ PrinterProfile = $PrinterProfile; GlobalSettings = $GlobalSettings; Secrets = $Secrets }
+    $searchRead = {
+        param($model, $domain, $fields)
+        Invoke-ErpOdooExecuteKw @common -Model $model -Method 'search_read' -Positional @(, $domain) -Keyword @{ fields = $fields }
+    }
     $session = Get-ErpOdooRpcSession -PrinterProfile $PrinterProfile -GlobalSettings $GlobalSettings -Secrets $Secrets -Refresh
-    $count = Invoke-ErpOdooExecuteKw -PrinterProfile $PrinterProfile -GlobalSettings $GlobalSettings -Secrets $Secrets `
-        -Model $PrinterProfile.OdooModel -Method 'search_count' -Positional @(, @())
-    "Connected to Odoo database '$($session.Database)' as uid $($session.Uid). The API user can see $count $($PrinterProfile.OdooModel) records."
+    $count = Invoke-ErpOdooExecuteKw @common -Model $PrinterProfile.OdooModel -Method 'search_count' -Positional @(, @())
+    "Connected to Odoo database '$($session.Database)' as uid $($session.Uid). The API user can see $count $($PrinterProfile.OdooModel) records." +
+        (Get-ErpOdooEdiTestMessage -PrinterProfile $PrinterProfile -SearchRead $searchRead)
 }

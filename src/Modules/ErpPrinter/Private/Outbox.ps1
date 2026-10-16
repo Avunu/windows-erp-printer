@@ -2,6 +2,7 @@
 #   <DataRoot>\spool\<profile>\outbox\<id>.pdf + <id>.json   waiting for delivery
 #   <DataRoot>\spool\<profile>\failed\...                   gave up (permanent error or MaxAttempts)
 #   <DataRoot>\spool\<profile>\sent\...                     delivered (only if KeepSentDays > 0)
+#   <DataRoot>\spool\<profile>\delivered.json                 running delivery count and the latest delivery
 #
 # The listener writes the PDF first and the JSON sidecar last, each via a .tmp rename,
 # so the presence of <id>.json means <id>.pdf is complete.
@@ -26,6 +27,7 @@ function Get-ErpProfilePaths {
         Outbox = Join-Path $root 'outbox'
         Failed = Join-Path $root 'failed'
         Sent   = Join-Path $root 'sent'
+        Stats  = Join-Path $root 'delivered.json'
     }
 }
 
@@ -128,6 +130,35 @@ function Move-ErpOutboxItem {
     if (Test-Path -LiteralPath $Item.PdfPath) { Move-Item -LiteralPath $Item.PdfPath -Destination $Destination -Force }
     Save-ErpOutboxMeta -Folder $Destination -Meta $Item.Meta
     Remove-Item -LiteralPath $Item.JsonPath -Force -ErrorAction SilentlyContinue
+}
+
+function Get-ErpDeliveryStats {
+    <# Returns @{ count; lastSentAt; lastTitle; lastRemoteId } for a profile, zeroed if nothing was delivered yet. #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)] [hashtable] $Paths)
+    $stats = [pscustomobject][ordered]@{ count = 0; lastSentAt = $null; lastTitle = $null; lastRemoteId = $null }
+    if (Test-Path -LiteralPath $Paths.Stats) {
+        try {
+            $saved = Get-Content -LiteralPath $Paths.Stats -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json
+            foreach ($property in $saved.PSObject.Properties) { if ($stats.PSObject.Properties[$property.Name]) { $stats.($property.Name) = $property.Value } }
+        } catch { Write-ErpLog -Level Warning -Message "Unreadable delivery stats $($Paths.Stats): $($_.Exception.Message)" }
+    }
+    $stats
+}
+
+function Add-ErpDeliveryStat {
+    <# Counts one delivery. Called after the document is gone from the outbox, so it must never throw. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [hashtable] $Paths, [Parameter(Mandatory)] $Meta)
+    try {
+        $stats = Get-ErpDeliveryStats -Paths $Paths
+        $stats.count = [int]$stats.count + 1
+        $stats.lastSentAt = $Meta.sentAt
+        $stats.lastTitle = $Meta.title
+        $stats.lastRemoteId = $Meta.remoteId
+        Write-ErpFileAtomic -Path $Paths.Stats -Content ($stats | ConvertTo-Json)
+    } catch { Write-ErpLog -Level Warning -Message "Could not update delivery stats: $($_.Exception.Message)" }
 }
 
 function Remove-ErpOutboxItem {

@@ -40,13 +40,18 @@ function Send-ErpOdooJson2Document {
         [Parameter(Mandatory)] [hashtable] $Secrets
     )
     $common = @{ PrinterProfile = $PrinterProfile; GlobalSettings = $GlobalSettings; Secrets = $Secrets }
+    $searchRead = {
+        param($model, $domain, $fields)
+        Invoke-ErpOdooJson2 @common -Model $model -Method 'search_read' -Body @{ domain = $domain; fields = $fields }
+    }
     $ownerId = Resolve-ErpOdooOwnerId -PrinterProfile $PrinterProfile -Meta $Meta -SearchUser {
         param($domain)
         $users = Invoke-ErpOdooJson2 @common -Model 'res.users' -Method 'search_read' -Body @{ domain = $domain; fields = @('id'); limit = 1 }
         $first = @($users) | Select-Object -First 1
         if ($first) { $first.id }
     }
-    $vals = Get-ErpOdooVals -PrinterProfile $PrinterProfile -Meta $Meta -FileName $FileName -OwnerId $ownerId
+    $typeId = Resolve-ErpOdooEdiExchangeTypeId -PrinterProfile $PrinterProfile -SearchRead $searchRead
+    $vals = Get-ErpOdooVals -PrinterProfile $PrinterProfile -Meta $Meta -FileName $FileName -OwnerId $ownerId -ExchangeTypeId $typeId
     $result = Invoke-ErpOdooJson2 @common -Model $PrinterProfile.OdooModel -Method 'create' -Body @{ vals_list = @(, $vals) } -PayloadPath $PdfPath
     [string](@($result) | Select-Object -First 1)
 }
@@ -59,7 +64,12 @@ function Test-ErpOdooJson2Connection {
         [System.Collections.IDictionary] $GlobalSettings = @{},
         [Parameter(Mandatory)] [hashtable] $Secrets
     )
-    $count = Invoke-ErpOdooJson2 -PrinterProfile $PrinterProfile -GlobalSettings $GlobalSettings -Secrets $Secrets `
-        -Model $PrinterProfile.OdooModel -Method 'search_count' -Body @{ domain = @() }
-    "Connected to Odoo (JSON-2). The API user can see $count $($PrinterProfile.OdooModel) records."
+    $common = @{ PrinterProfile = $PrinterProfile; GlobalSettings = $GlobalSettings; Secrets = $Secrets }
+    $searchRead = {
+        param($model, $domain, $fields)
+        Invoke-ErpOdooJson2 @common -Model $model -Method 'search_read' -Body @{ domain = $domain; fields = $fields }
+    }
+    $count = Invoke-ErpOdooJson2 @common -Model $PrinterProfile.OdooModel -Method 'search_count' -Body @{ domain = @() }
+    "Connected to Odoo (JSON-2). The API user can see $count $($PrinterProfile.OdooModel) records." +
+        (Get-ErpOdooEdiTestMessage -PrinterProfile $PrinterProfile -SearchRead $searchRead)
 }

@@ -59,7 +59,7 @@ try {
         'Status' {
             $status = Get-ErpPrinterStatus
             $status | Select-Object Version, Listener, Uploader, Updater, DataRoot | Format-List | Out-String | Write-Output
-            $status.Profiles | Format-Table Profile, Enabled, Backend, Printer, PrinterOk, Pending, Failed, Sent -AutoSize | Out-String | Write-Output
+            $status.Profiles | Format-Table Profile, Enabled, Backend, Printer, PrinterOk, Pending, Failed, Sent, LastSent, LastRemoteId -AutoSize | Out-String | Write-Output
             $status.Profiles | Where-Object LastError | ForEach-Object { Write-Output "[$($_.Profile)] last error: $($_.LastError)" }
         }
         'Test' {

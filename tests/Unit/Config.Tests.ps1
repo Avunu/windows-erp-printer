@@ -184,6 +184,7 @@ Describe 'Test-ErpPrinterProfile' {
         @{ Case = 'JSON-RPC without login'; Overrides = @{ Backend = 'OdooJsonRpc' }; Secrets = @{ ApiKey = 'k' }; Expected = '*login*' }
         @{ Case = 'bad extra fields'; Overrides = @{ OdooExtraFields = '{nope' }; Secrets = @{ ApiKey = 'k' }; Expected = '*JSON object*' }
         @{ Case = 'half an attachment target'; Overrides = @{ OdooModel = 'ir.attachment'; OdooResModel = 'res.partner' }; Secrets = @{ ApiKey = 'k' }; Expected = '*Attach to model*' }
+        @{ Case = 'an EDI target without an exchange type'; Overrides = @{ OdooModel = 'edi.exchange.record'; OdooEdiBackendId = 3 }; Secrets = @{ ApiKey = 'k' }; Expected = '*EDI exchange type code*' }
         @{ Case = 'bad pipe name'; Overrides = @{ PipeName = 'a b' }; Secrets = @{ ApiKey = 'k' }; Expected = '*Pipe name*' }
     ) {
         param($Overrides, $Secrets, $Expected)
