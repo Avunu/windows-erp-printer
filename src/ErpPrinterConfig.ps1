@@ -407,7 +407,8 @@ function Update-Status {
     $statusList.Items.Clear()
     foreach ($p in $status.Profiles) {
         $item = New-Object Windows.Forms.ListViewItem($p.Profile)
-        foreach ($text in @($p.Printer, $(if ($p.PrinterOk) { 'OK' } elseif ($p.Enabled) { 'Missing' } else { 'Disabled' }), $p.Pending, $p.Failed, $p.Sent, [string]$p.LastError)) {
+        $lastSent = if ($p.LastSent) { "$($p.LastSent.ToString('g'))$(if ($p.LastRemoteId) { " (id $($p.LastRemoteId))" })" } else { '' }
+        foreach ($text in @($p.Printer, $(if ($p.PrinterOk) { 'OK' } elseif ($p.Enabled) { 'Missing' } else { 'Disabled' }), $p.Pending, $p.Failed, $p.Sent, $lastSent, [string]$p.LastError)) {
             $null = $item.SubItems.Add([string]$text)
         }
         $item.Tag = $p
@@ -514,7 +515,7 @@ $statusList.Dock = 'Fill'
 $statusList.View = 'Details'
 $statusList.FullRowSelect = $true
 $statusList.MultiSelect = $false
-foreach ($column in @(@('Printer profile', 150), @('Windows printer', 150), @('Queue', 70), @('Pending', 65), @('Failed', 60), @('Sent', 55), @('Last error', 360))) {
+foreach ($column in @(@('Printer profile', 150), @('Windows printer', 150), @('Queue', 70), @('Pending', 65), @('Failed', 60), @('Sent', 55), @('Last sent', 170), @('Last error', 190))) {
     $null = $statusList.Columns.Add($column[0], $column[1])
 }
 $statusButtons = New-Object Windows.Forms.FlowLayoutPanel

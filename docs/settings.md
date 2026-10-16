@@ -67,10 +67,12 @@ A value under `Policies` wins and shows as read-only in the configuration window
 
 | Name | Type | Default | Backends | Description |
 | --- | --- | --- | --- | --- |
-| `OdooModel` | REG_SZ: `documents.document`, `ir.attachment` | `documents.document` | OdooJson2, OdooJsonRpc | Odoo model. documents.document needs the Documents app (Enterprise). ir.attachment works on Community. |
+| `OdooModel` | REG_SZ: `documents.document`, `ir.attachment`, `edi.exchange.record` | `documents.document` | OdooJson2, OdooJsonRpc | Odoo model. documents.document needs the Documents app (Enterprise). ir.attachment works on Community. edi.exchange.record needs the OCA edi_core_oca module. |
 | `OdooFolderId` | REG_DWORD 0-2147483647 | `0` | OdooJson2, OdooJsonRpc | Documents folder ID. Target folder for documents.document. 0 leaves it unset. |
 | `OdooResModel` | REG_SZ | (empty) | OdooJson2, OdooJsonRpc | Attach to model. For ir.attachment: model of the record to attach to, e.g. res.partner. |
 | `OdooResId` | REG_DWORD 0-2147483647 | `0` | OdooJson2, OdooJsonRpc | Attach to record ID. |
+| `OdooEdiBackendId` | REG_DWORD 0-2147483647 | `0` | OdooJson2, OdooJsonRpc | EDI backend ID. For edi.exchange.record: id of the edi.backend that receives the documents. |
+| `OdooEdiExchangeType` | REG_SZ | (empty) | OdooJson2, OdooJsonRpc | EDI exchange type code. For edi.exchange.record: code of an input edi.exchange.type on that backend (or shared by its backend type). |
 | `OdooExtraFields` | REG_SZ | (empty) | OdooJson2, OdooJsonRpc | Extra fields (JSON). JSON object merged into the created record. Template tokens are expanded, e.g. {"description": "Printed by {user}"}. |
 | `UserMapping` | REG_DWORD 0/1 | 0 (off) | OdooJson2, OdooJsonRpc | Map Windows users to Odoo users. Looks up the printing user in res.users (login or email) and sets owner_id on documents.document. |
 | `UserEmailDomain` | REG_SZ | (empty) | OdooJson2, OdooJsonRpc | User email domain. Optional. Also tries <username>@<domain> when mapping users. Active Directory mail/UPN are tried automatically. |

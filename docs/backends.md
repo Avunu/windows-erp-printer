@@ -12,6 +12,7 @@ Uses the external JSON-2 API: `POST /json/2/<model>/create` with `Authorization:
 4. Choose the destination:
    - **documents.document** (Documents app, Enterprise): set **Documents folder ID**. Open the folder in Odoo; the id is in the URL, or under *Settings > Technical > Models > documents.document*.
    - **ir.attachment** (works on Community): optionally set **Attach to model**/**Attach to record ID** to land the file on a specific record, such as a "Scanned inbox" `res.partner` or a project.
+   - **edi.exchange.record** (OCA `edi_core_oca`): set **EDI backend ID** and **EDI exchange type code**. See [EDI exchange records](#edi-exchange-records) below.
 5. Optional: **Map Windows users to Odoo users** sets `owner_id` on `documents.document`. The printing user is looked up in `res.users` by login or email. Candidates are the Windows user name, `<user>@<User email domain>`, and the user's AD `mail` and `userPrincipalName`. Results are cached for a day, and misses for an hour.
 6. Optional: **Extra fields (JSON)** is merged into the created record, with template tokens expanded. For example:
 
@@ -20,6 +21,20 @@ Uses the external JSON-2 API: `POST /json/2/<model>/create` with `Authorization:
    ```
 
 Field names on `documents.document` changed between Odoo versions (folders became documents in 18). Check your version's model before relying on custom fields.
+
+### EDI exchange records
+
+With **Odoo model** set to `edi.exchange.record`, every printed document becomes an inbound exchange record of the [OCA EDI framework](https://github.com/OCA/edi-framework). It then shows up under *EDI > Exchange records*, where it can be processed, retried and traced like any other exchange, instead of arriving as a bare attachment.
+
+The record is created with the PDF as its exchange file, the file name from **File name template**, and the state *Received* (`input_received`): the document has already arrived, so there is nothing left for a receive step to fetch. From there the backend processes it as usual: immediately during the upload if the exchange type has **Quick execution** on, otherwise on the next run of the EDI process cron.
+
+In Odoo:
+
+1. Create (or reuse) an `edi.backend`. Its id is in the URL of its form.
+2. Create an `edi.exchange.type` with direction **Input** and a **Code**, either on that backend or on its backend type with no backend set. Choose a **Processor** for the PDF, for example one that runs a `base.import.pdf.template`.
+3. Give the integration user rights to create EDI exchange records and to read backends and exchange types.
+
+In the profile, set **EDI backend ID** and **EDI exchange type code**. The code is resolved like `edi.backend.create_record()` does: a type pinned to the backend wins over one shared by its backend type. Lookups are cached for an hour. **Test connection** reports which exchange type the code resolves to. **Extra fields (JSON)** works here too, for example to set `company_id`.
 
 ## Odoo 14-18 (`OdooJsonRpc`)
 

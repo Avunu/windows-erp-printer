@@ -1,6 +1,6 @@
 # ERP Printer
 
-Virtual printers for Windows that deliver whatever you print straight into your ERP: Odoo (Documents or any record's attachments), ERPNext / Frappe, or any HTTP endpoint through a webhook.
+Virtual printers for Windows that deliver whatever you print straight into your ERP: Odoo (Documents, any record's attachments, or OCA EDI exchange records), ERPNext / Frappe, or any HTTP endpoint through a webhook.
 
 Users pick a printer such as **Send to Odoo** in any application's print dialog. The job becomes a PDF, is queued locally, and is uploaded in the background with the Windows user and document title attached. If the ERP is unreachable, documents wait in the outbox and are retried; nothing is lost.
 
@@ -101,7 +101,7 @@ The file name sent to the ERP comes from `FileNameTemplate` (default `{title}`),
 ## Operate
 
 ```powershell
-& 'C:\Program Files\ERP Printer\ErpPrinter.ps1' -Command Status     # tasks, printers, pending/failed counts, last error
+& 'C:\Program Files\ERP Printer\ErpPrinter.ps1' -Command Status     # tasks, printers, pending/failed/sent counts, last error
 & 'C:\Program Files\ERP Printer\ErpPrinter.ps1' -Command Test -ProfileName 'Send to Odoo'
 & 'C:\Program Files\ERP Printer\ErpPrinter.ps1' -Command Retry      # move failed documents back to the outbox
 & 'C:\Program Files\ERP Printer\ErpPrinter.ps1' -Command Upload -Once -Force

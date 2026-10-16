@@ -103,6 +103,24 @@ Describe 'Send-ErpOutboxItem' {
         @(Get-ChildItem $script:Paths.Sent).Count | Should -Be 0
     }
 
+    It 'counts deliveries whether or not sent documents are kept' {
+        Mock -ModuleName ErpPrinter Send-ErpDocument { 'remote-42' }
+        Invoke-SendItem $script:Paths $script:Id (New-TestSettings) | Should -Be 'Sent'
+        $second = Add-TestItem $script:Paths
+        Invoke-SendItem $script:Paths $second (New-TestSettings @{ KeepSentDays = 7 }) | Should -Be 'Sent'
+        $stats = InModuleScope ErpPrinter -Parameters @{ Paths = $script:Paths } { param($Paths) Get-ErpDeliveryStats -Paths $Paths }
+        $stats.count | Should -Be 2
+        $stats.lastTitle | Should -Be 'Invoice 7'
+        $stats.lastRemoteId | Should -Be 'remote-42'
+        $stats.lastSentAt | Should -Not -BeNullOrEmpty
+    }
+
+    It 'still reports success when the delivery stats cannot be written' {
+        Mock -ModuleName ErpPrinter Send-ErpDocument { 'remote-42' }
+        New-Item -ItemType Directory -Path $script:Paths.Stats | Out-Null
+        Invoke-SendItem $script:Paths $script:Id (New-TestSettings) -WarningAction SilentlyContinue | Should -Be 'Sent'
+    }
+
     It 'archives delivered items when KeepSentDays is set' {
         Mock -ModuleName ErpPrinter Send-ErpDocument { 'remote-42' }
         Invoke-SendItem $script:Paths $script:Id (New-TestSettings @{ KeepSentDays = 7 }) | Should -Be 'Sent'

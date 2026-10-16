@@ -48,7 +48,7 @@ BeforeAll {
 Describe 'OdooJson2 backend' {
     BeforeEach {
         Mock -ModuleName ErpPrinter Get-ErpDirectoryIdentity { @('john.doe@corp.example') }
-        InModuleScope ErpPrinter { $script:ErpUserCache.Clear() }
+        InModuleScope ErpPrinter { $script:ErpUserCache.Clear(); $script:ErpEdiTypeCache.Clear() }
     }
 
     It 'creates a documents.document with folder and base64 content' {
@@ -102,6 +102,50 @@ Describe 'OdooJson2 backend' {
         $vals.public | Should -BeFalse
     }
 
+    It 'creates a received edi.exchange.record, preferring the type pinned to the backend' {
+        Set-HttpReplies @(
+            @{ Status = 200; Body = '[{"id": 3, "backend_type_id": [2, "PDF import"]}]' }
+            @{ Status = 200; Body = '[{"id": 8, "backend_id": false, "direction": "input"}, {"id": 9, "backend_id": [3, "Printers"], "direction": "input"}]' }
+            @{ Status = 200; Body = '[55]' }
+            @{ Status = 200; Body = '[56]' }
+        )
+        $printerProfile = New-TestProfile OdooJson2 @{ OdooModel = 'edi.exchange.record'; OdooEdiBackendId = 3; OdooEdiExchangeType = 'printed_po' }
+        Invoke-Backend Send $printerProfile | Should -Be '55'
+        Invoke-Backend Send $printerProfile | Should -Be '56'
+        $script:Calls.Count | Should -Be 4
+        $script:Calls[0].Uri | Should -BeLike '*/json/2/edi.backend/search_read'
+        $typeSearch = ConvertFrom-Json $script:Calls[1].Body
+        $script:Calls[1].Uri | Should -BeLike '*/json/2/edi.exchange.type/search_read'
+        $typeSearch.domain[0] | Should -Be @('code', '=', 'printed_po')
+        $typeSearch.domain[5] | Should -Be @('backend_type_id', '=', 2)
+        $script:Calls[2].Uri | Should -BeLike '*/json/2/edi.exchange.record/create'
+        $vals = (ConvertFrom-Json $script:Calls[2].Body).vals_list[0]
+        $vals.backend_id | Should -Be 3
+        $vals.type_id | Should -Be 9
+        $vals.edi_exchange_state | Should -Be 'input_received'
+        $vals.exchange_filename | Should -Be 'Invoice 7.pdf'
+        [Text.Encoding]::ASCII.GetString([Convert]::FromBase64String($vals.exchange_file)) | Should -BeLike '%PDF*'
+        $vals.PSObject.Properties['name'] | Should -BeNullOrEmpty
+        $vals.PSObject.Properties['datas'] | Should -BeNullOrEmpty
+    }
+
+    It 'refuses an EDI exchange type that is <Case>' -TestCases @(
+        @{ Case = 'missing'; Types = '[]'; Expected = "*No EDI exchange type with code 'printed_po' on backend #3*" }
+        @{ Case = 'an output type'; Types = '[{"id": 8, "backend_id": false, "direction": "output"}]'; Expected = '*is an output type*' }
+    ) {
+        param($Types, $Expected)
+        Set-HttpReplies @(@{ Status = 200; Body = '[{"id": 3, "backend_type_id": [2, "PDF import"]}]' }, @{ Status = 200; Body = $Types })
+        $printerProfile = New-TestProfile OdooJson2 @{ OdooModel = 'edi.exchange.record'; OdooEdiBackendId = 3; OdooEdiExchangeType = 'printed_po' }
+        { Invoke-Backend Send $printerProfile } | Should -Throw $Expected
+        $script:Calls.Count | Should -Be 2
+    }
+
+    It 'reports a missing EDI backend' {
+        Set-HttpReplies @(@{ Status = 200; Body = '[]' })
+        $printerProfile = New-TestProfile OdooJson2 @{ OdooModel = 'edi.exchange.record'; OdooEdiBackendId = 3; OdooEdiExchangeType = 'printed_po' }
+        { Invoke-Backend Send $printerProfile } | Should -Throw '*EDI backend #3 does not exist*'
+    }
+
     It 'explains a missing JSON-2 endpoint' {
         Set-HttpReplies @(@{ Status = 404; Body = '' })
         { Invoke-Backend Send (New-TestProfile OdooJson2) } | Should -Throw '*OdooJsonRpc backend*'
@@ -117,7 +161,7 @@ Describe 'OdooJson2 backend' {
 Describe 'OdooJsonRpc backend' {
     BeforeEach {
         Mock -ModuleName ErpPrinter Get-ErpDirectoryIdentity { @() }
-        InModuleScope ErpPrinter { $script:ErpOdooSessions.Clear() }
+        InModuleScope ErpPrinter { $script:ErpOdooSessions.Clear(); $script:ErpEdiTypeCache.Clear() }
     }
 
     It 'authenticates, then creates through execute_kw' {
@@ -137,6 +181,35 @@ Describe 'OdooJsonRpc backend' {
         $create.params.args[3] | Should -Be 'documents.document'
         $create.params.args[4] | Should -Be 'create'
         $create.params.args[5][0].folder_id | Should -Be 4
+    }
+
+    It 'resolves the EDI exchange type through search_read, then creates the record' {
+        Set-HttpReplies @(
+            @{ Status = 200; Body = '{"result": 6}' }
+            @{ Status = 200; Body = '{"result": [{"id": 3, "backend_type_id": [2, "PDF import"]}]}' }
+            @{ Status = 200; Body = '{"result": [{"id": 8, "backend_id": false, "direction": "input"}]}' }
+            @{ Status = 200; Body = '{"result": 91}' }
+        )
+        $printerProfile = New-TestProfile OdooJsonRpc @{ Database = 'prod'; Username = 'api'; OdooModel = 'edi.exchange.record'; OdooEdiBackendId = 3; OdooEdiExchangeType = 'printed_po' }
+        Invoke-Backend Send $printerProfile | Should -Be '91'
+        $backendSearch = (ConvertFrom-Json $script:Calls[1].Body).params.args
+        $backendSearch[3..4] | Should -Be @('edi.backend', 'search_read')
+        $backendSearch[6].fields | Should -Be @('backend_type_id')
+        $create = (ConvertFrom-Json $script:Calls[3].Body).params.args
+        $create[3..4] | Should -Be @('edi.exchange.record', 'create')
+        $create[5][0].type_id | Should -Be 8
+        $create[5][0].edi_exchange_state | Should -Be 'input_received'
+    }
+
+    It 'names the EDI exchange type in the connection test' {
+        Set-HttpReplies @(
+            @{ Status = 200; Body = '{"result": 6}' }
+            @{ Status = 200; Body = '{"result": 4}' }
+            @{ Status = 200; Body = '{"result": [{"id": 3, "backend_type_id": [2, "PDF import"]}]}' }
+            @{ Status = 200; Body = '{"result": [{"id": 8, "backend_id": false, "direction": "input"}]}' }
+        )
+        $printerProfile = New-TestProfile OdooJsonRpc @{ Database = 'prod'; Username = 'api'; OdooModel = 'edi.exchange.record'; OdooEdiBackendId = 3; OdooEdiExchangeType = 'printed_po' }
+        Invoke-Backend Test $printerProfile | Should -BeLike "*4 edi.exchange.record records. Exchange type 'printed_po' is #8 on EDI backend #3."
     }
 
     It 'discovers the database when the server has exactly one' {

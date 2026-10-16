@@ -87,13 +87,17 @@ $script:ErpProfileSchema = @(
         -Help 'Stored encrypted (DPAPI, machine scope) in a registry key only SYSTEM and Administrators can read. For Webhook this is the auth header value.'
     New-ErpSettingDefinition -Name ApiSecret -Type Secret -Group 'Connection' -Label 'API secret' -Default '' -Backends @('ERPNext') -Required
     New-ErpSettingDefinition -Name OdooModel -Type Choice -Group 'Destination' -Label 'Odoo model' -Default 'documents.document' `
-        -Choices @('documents.document', 'ir.attachment') -Backends $script:ErpOdooBackends `
-        -Help 'documents.document needs the Documents app (Enterprise). ir.attachment works on Community.'
+        -Choices @('documents.document', 'ir.attachment', 'edi.exchange.record') -Backends $script:ErpOdooBackends `
+        -Help 'documents.document needs the Documents app (Enterprise). ir.attachment works on Community. edi.exchange.record needs the OCA edi_core_oca module.'
     New-ErpSettingDefinition -Name OdooFolderId -Type Int -Group 'Destination' -Label 'Documents folder ID' -Default 0 -Backends $script:ErpOdooBackends `
         -Help 'Target folder for documents.document. 0 leaves it unset.'
     New-ErpSettingDefinition -Name OdooResModel -Type String -Group 'Destination' -Label 'Attach to model' -Default '' -Backends $script:ErpOdooBackends `
         -Help 'For ir.attachment: model of the record to attach to, e.g. res.partner.'
     New-ErpSettingDefinition -Name OdooResId -Type Int -Group 'Destination' -Label 'Attach to record ID' -Default 0 -Backends $script:ErpOdooBackends
+    New-ErpSettingDefinition -Name OdooEdiBackendId -Type Int -Group 'Destination' -Label 'EDI backend ID' -Default 0 -Backends $script:ErpOdooBackends `
+        -Help 'For edi.exchange.record: id of the edi.backend that receives the documents.'
+    New-ErpSettingDefinition -Name OdooEdiExchangeType -Type String -Group 'Destination' -Label 'EDI exchange type code' -Default '' -Backends $script:ErpOdooBackends `
+        -Help 'For edi.exchange.record: code of an input edi.exchange.type on that backend (or shared by its backend type).'
     New-ErpSettingDefinition -Name OdooExtraFields -Type String -Group 'Destination' -Label 'Extra fields (JSON)' -Default '' -Backends $script:ErpOdooBackends `
         -Help 'JSON object merged into the created record. Template tokens are expanded, e.g. {"description": "Printed by {user}"}.'
     New-ErpSettingDefinition -Name UserMapping -Type Bool -Group 'Destination' -Label 'Map Windows users to Odoo users' -Default $false -Backends $script:ErpOdooBackends `

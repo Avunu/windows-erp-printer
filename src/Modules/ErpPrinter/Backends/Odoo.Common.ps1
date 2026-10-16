@@ -1,20 +1,33 @@
 # Shared by the OdooJson2 and OdooJsonRpc backends.
 
 $script:ErpUserCache = @{}
+$script:ErpEdiTypeCache = @{}
 
 function Get-ErpOdooVals {
-    <# Builds the create() values. 'datas' holds the payload placeholder that is replaced with base64 at send time. #>
+    <# Builds the create() values. The binary field holds the payload placeholder that is replaced with base64 at send time. #>
     [CmdletBinding()]
     [OutputType([System.Collections.Specialized.OrderedDictionary])]
     param(
         [Parameter(Mandatory)] [System.Collections.IDictionary] $PrinterProfile,
         [Parameter(Mandatory)] $Meta,
         [Parameter(Mandatory)] [string] $FileName,
-        [int] $OwnerId = 0
+        [int] $OwnerId = 0,
+        [int] $ExchangeTypeId = 0
     )
-    $vals = [ordered]@{ name = $FileName; datas = '@@ERP_PAYLOAD@@' }
     switch ($PrinterProfile.OdooModel) {
+        'edi.exchange.record' {
+            # The whole document has already arrived, so the record starts as received: the
+            # backend's process cron (or quick_exec, during create) picks it up from there.
+            $vals = [ordered]@{
+                backend_id         = [int]$PrinterProfile.OdooEdiBackendId
+                type_id            = $ExchangeTypeId
+                exchange_filename  = $FileName
+                exchange_file      = '@@ERP_PAYLOAD@@'
+                edi_exchange_state = 'input_received'
+            }
+        }
         'ir.attachment' {
+            $vals = [ordered]@{ name = $FileName; datas = '@@ERP_PAYLOAD@@' }
             $vals['mimetype'] = 'application/pdf'
             if ($PrinterProfile.OdooResModel -and $PrinterProfile.OdooResId) {
                 $vals['res_model'] = $PrinterProfile.OdooResModel
@@ -23,6 +36,7 @@ function Get-ErpOdooVals {
             $vals['description'] = "Printed by $($Meta.user) on $($Meta.computer)"
         }
         default {
+            $vals = [ordered]@{ name = $FileName; datas = '@@ERP_PAYLOAD@@' }
             if ($PrinterProfile.OdooFolderId -gt 0) { $vals['folder_id'] = [int]$PrinterProfile.OdooFolderId }
             if ($OwnerId -gt 0) { $vals['owner_id'] = $OwnerId }
         }
@@ -34,6 +48,64 @@ function Get-ErpOdooVals {
         foreach ($property in $extra.PSObject.Properties) { $vals[$property.Name] = $property.Value }
     }
     $vals
+}
+
+function Resolve-ErpOdooEdiExchangeTypeId {
+    <#
+    Finds the edi.exchange.type for the profile's code the way edi.backend.create_record()
+    does: a type pinned to the backend wins over one shared by its backend type. Hits are
+    cached for an hour. $SearchRead is a backend-specific scriptblock:
+    param($model, $domain, $fields) -> records. Returns 0 for other Odoo models.
+    #>
+    [CmdletBinding()]
+    [OutputType([int])]
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $PrinterProfile,
+        [Parameter(Mandatory)] [scriptblock] $SearchRead
+    )
+    if ($PrinterProfile.OdooModel -ne 'edi.exchange.record') { return 0 }
+    $backendId = [int]$PrinterProfile.OdooEdiBackendId
+    $code = [string]$PrinterProfile.OdooEdiExchangeType
+    $cacheKey = "$($PrinterProfile.ServerUrl)|$($PrinterProfile.Database)|$backendId|$code".ToLowerInvariant()
+    $cached = $script:ErpEdiTypeCache[$cacheKey]
+    if ($cached -and $cached.Expires -gt (Get-Date)) { return $cached.Id }
+
+    $backend = @(& $SearchRead 'edi.backend' @(, @('id', '=', $backendId)) @('backend_type_id')) | Select-Object -First 1
+    if (-not $backend) { throw (New-ErpException "EDI backend #$backendId does not exist, is archived, or the API user cannot read it.") }
+    $backendTypeId = ConvertFrom-ErpOdooMany2one $backend.backend_type_id
+    $domain = @(@('code', '=', $code), '|', @('backend_id', '=', $backendId), '&', @('backend_id', '=', $false), @('backend_type_id', '=', $backendTypeId))
+    $types = @(& $SearchRead 'edi.exchange.type' $domain @('backend_id', 'direction'))
+    $type = @($types | Where-Object { ConvertFrom-ErpOdooMany2one $_.backend_id }) + $types | Select-Object -First 1
+    if (-not $type) { throw (New-ErpException "No EDI exchange type with code '$code' on backend #$backendId.") }
+    if ($type.direction -ne 'input') { throw (New-ErpException "EDI exchange type '$code' is an $($type.direction) type; printed documents need an input type.") }
+    $id = [int]$type.id
+    $script:ErpEdiTypeCache[$cacheKey] = @{ Id = $id; Expires = (Get-Date).AddHours(1) }
+    $id
+}
+
+function Get-ErpOdooEdiTestMessage {
+    <# For Test connection: resolves the exchange type afresh and describes it, or returns '' for other models. #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)] [System.Collections.IDictionary] $PrinterProfile,
+        [Parameter(Mandatory)] [scriptblock] $SearchRead
+    )
+    if ($PrinterProfile.OdooModel -ne 'edi.exchange.record') { return '' }
+    $script:ErpEdiTypeCache.Clear()
+    $id = Resolve-ErpOdooEdiExchangeTypeId -PrinterProfile $PrinterProfile -SearchRead $SearchRead
+    " Exchange type '$($PrinterProfile.OdooEdiExchangeType)' is #$id on EDI backend #$($PrinterProfile.OdooEdiBackendId)."
+}
+
+function ConvertFrom-ErpOdooMany2one {
+    <# read() returns many2one values as [id, name], false when empty, or (JSON-2 specification reads) {id: ...}. #>
+    [CmdletBinding()]
+    [OutputType([int])]
+    param([AllowNull()] $Value)
+    if (-not $Value) { return 0 }
+    if ($Value -is [array]) { return [int]$Value[0] }
+    if ($Value.PSObject.Properties['id']) { return [int]$Value.id }
+    [int]$Value
 }
 
 function Get-ErpUserIdentityCandidates {

@@ -104,6 +104,7 @@ function Send-ErpOutboxItem {
         $meta.nextAttempt = $null
         if ($GlobalSettings.KeepSentDays -gt 0) { Move-ErpOutboxItem -Item $Item -Destination $Paths.Sent }
         else { Remove-ErpOutboxItem -Item $Item }
+        Add-ErpDeliveryStat -Paths $Paths -Meta $meta
         Write-ErpLog -Message "Delivered $label to $($PrinterProfile.Backend) (remote id: $remoteId)." -EventId 1002
         return 'Sent'
     } catch {
@@ -185,6 +186,7 @@ function Get-ErpPrinterStatus {
         $pending = @(Get-ErpOutboxItems -Folder $paths.Outbox)
         $failed = @(Get-ErpOutboxItems -Folder $paths.Failed)
         $lastError = @($pending + $failed | Where-Object { $_.Meta.lastError } | ForEach-Object { $_.Meta.lastError }) | Select-Object -Last 1
+        $delivered = Get-ErpDeliveryStats -Paths $paths
         [pscustomobject]@{
             Profile     = $printerProfile.Name
             Enabled     = $printerProfile.Enabled
@@ -193,7 +195,9 @@ function Get-ErpPrinterStatus {
             PrinterOk   = [bool]($queue -and $queue.PortName -eq (Get-ErpPortName $printerProfile.PipeName))
             Pending     = $pending.Count
             Failed      = $failed.Count
-            Sent        = @(Get-ChildItem -LiteralPath $paths.Sent -Filter '*.json' -ErrorAction SilentlyContinue).Count
+            Sent        = [int]$delivered.count
+            LastSent    = $(if ($delivered.lastSentAt) { ConvertTo-ErpDateTime $delivered.lastSentAt })
+            LastRemoteId = $delivered.lastRemoteId
             LastError   = $lastError
             OutboxPath  = $paths.Root
         }
