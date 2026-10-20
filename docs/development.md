@@ -16,6 +16,7 @@ src/
     Private/Outbox.ps1           spool folder layout, sidecars, retry backoff
     Private/Http.ps1             HttpClient transport + error classification
     Private/Windows.ps1          pipe server, spooler job lookup, driver/port/printer plumbing
+    Private/Diagnostics.ps1      diagnostic checks, report formatting, test-print verdict
     Private/Tasks.ps1            scheduled task registration
     Backends/*.ps1               one file per ERP
     Public/*.ps1                 exported commands

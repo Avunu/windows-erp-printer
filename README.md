@@ -103,6 +103,8 @@ The file name sent to the ERP comes from `FileNameTemplate` (default `{title}`),
 ```powershell
 & 'C:\Program Files\ERP Printer\ErpPrinter.ps1' -Command Status     # tasks, printers, pending/failed/sent counts, last error
 & 'C:\Program Files\ERP Printer\ErpPrinter.ps1' -Command Test -ProfileName 'Send to Odoo'
+& 'C:\Program Files\ERP Printer\ErpPrinter.ps1' -Command Diagnose   # check every hop from printer to ERP and save a report (run elevated)
+& 'C:\Program Files\ERP Printer\ErpPrinter.ps1' -Command TestPrint -ProfileName 'Send to Odoo'   # print a page and report where it stops
 & 'C:\Program Files\ERP Printer\ErpPrinter.ps1' -Command Retry      # move failed documents back to the outbox
 & 'C:\Program Files\ERP Printer\ErpPrinter.ps1' -Command Upload -Once -Force
 & 'C:\Program Files\ERP Printer\ErpPrinter.ps1' -Command Update -CheckOnly
@@ -110,7 +112,7 @@ The file name sent to the ERP comes from `FileNameTemplate` (default `{title}`),
 
 -   **Scheduled tasks** (under `\ERP Printer\`, running as SYSTEM): `Listener` and `Uploader` start at boot, with a 5-minute watchdog trigger that restarts them if they exit. `Updater` runs daily.
     
--   **Logs:** `%ProgramData%\ErpPrinter\logs\<component>-yyyyMMdd.log`, plus the Application event log, source `ErpPrinter`:
+-   **Logs:** `%ProgramData%\ErpPrinter\logs\<component>-yyyyMMdd.log` (`listener`, `uploader`, `cli`), plus the Application event log, source `ErpPrinter`. If a print does not arrive, start with [troubleshooting](docs/troubleshooting.md):
     
     | Event ID | Meaning |
     | --- | --- |

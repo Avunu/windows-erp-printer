@@ -30,6 +30,8 @@
         'Invoke-ErpPrinterUpdate'
         'Get-ErpPrinterVersion'
         'Restart-ErpPrinterService'
+        'Invoke-ErpPrinterDiagnostics'
+        'Invoke-ErpPrinterTestPrint'
     )
     CmdletsToExport      = @()
     VariablesToExport    = @()

@@ -8,16 +8,18 @@ function Start-ErpPrinterUploader {
     #>
     [CmdletBinding()]
     param()
+    $config = Get-ErpPrinterConfig
+    Set-ErpLogContext -Component 'uploader' -GlobalSettings $config.Global
     $mutex = New-Object System.Threading.Mutex($false, 'Global\ErpPrinterUploader')
     if (-not $mutex.WaitOne(0)) {
-        Write-Warning 'Another uploader is already running.'
+        Write-ErpLog -Level Warning -Message "Another uploader is already running; this one (PID $PID) is exiting."
+        $mutex.Dispose()
         return
     }
     try {
         $signal = Get-ErpOutboxSignal
-        $config = Get-ErpPrinterConfig
-        Set-ErpLogContext -Component 'uploader' -GlobalSettings $config.Global
         Write-ErpLog -Message "Uploader started (version $(Get-ErpPrinterVersion), PID $PID)."
+        Write-ErpLog -Message (Get-ErpRuntimeSummary -GlobalSettings $config.Global)
         $nextHousekeeping = [DateTime]::MinValue
         while ($true) {
             $config = Get-ErpPrinterConfig
@@ -29,11 +31,15 @@ function Start-ErpPrinterUploader {
                     $nextHousekeeping = (Get-Date).AddHours(1)
                 }
             } catch {
-                Write-ErpLog -Level Error -Message "Upload pass failed: $($_.Exception.Message)"
+                Write-ErpExceptionLog -Message 'Upload pass failed' -ErrorRecord $_
             }
             $null = $signal.WaitOne([TimeSpan]::FromSeconds($config.Global.PollIntervalSeconds))
         }
+    } catch {
+        Write-ErpExceptionLog -Message 'The uploader crashed' -ErrorRecord $_
+        throw
     } finally {
+        Write-ErpLog -Message 'Uploader stopped.'
         $mutex.ReleaseMutex()
         $mutex.Dispose()
     }
@@ -97,6 +103,7 @@ function Send-ErpOutboxItem {
         }
         if (-not $PrinterProfile.Enabled) { throw (New-ErpException 'The printer profile is disabled.') }
 
+        Write-ErpLog -Level Verbose -Message "Sending $label to $($PrinterProfile.Backend) at $($PrinterProfile.ServerUrl) (attempt $($meta.attempts))."
         $remoteId = Send-ErpDocument -PrinterProfile $PrinterProfile -GlobalSettings $GlobalSettings -Item $Item
         $meta.remoteId = $remoteId
         $meta.sentAt = $Now.ToString('o')

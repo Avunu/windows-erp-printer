@@ -67,6 +67,36 @@ function Get-ErpPortName {
     "\\.\pipe\$PipeName"
 }
 
+function Test-ErpPipeExists {
+    <#
+    Whether a named pipe is currently hosted by some process. Lists \\.\pipe\ rather than
+    opening the pipe: connecting would consume the listener's only instance. Returns $null
+    when the list cannot be read.
+    #>
+    [CmdletBinding()]
+    [OutputType([object])]
+    param([Parameter(Mandatory)] [string] $PipeName)
+    if (-not $script:ErpIsWindows) { return $null }
+    try {
+        $wanted = Get-ErpPortName $PipeName
+        [bool](@([IO.Directory]::GetFiles('\\.\pipe\')) | Where-Object { $_ -ieq $wanted })
+    } catch {
+        Write-Verbose "Could not list named pipes: $_"
+        $null
+    }
+}
+
+function Get-ErpRuntimeSummary {
+    <# One log line describing the process: who it runs as, which PowerShell, where data and logs go. #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([System.Collections.IDictionary] $GlobalSettings)
+    $identity = try { [Security.Principal.WindowsIdentity]::GetCurrent().Name } catch { 'unknown' }
+    $dataRoot = if ($GlobalSettings) { $GlobalSettings.DataRoot } else { '' }
+    $level = if ($GlobalSettings) { $GlobalSettings.LogLevel } else { '' }
+    "Runtime: user $identity, PowerShell $($PSVersionTable.PSVersion) ($($PSVersionTable.PSEdition)), language mode $($ExecutionContext.SessionState.LanguageMode), OS $([Environment]::OSVersion.Version), data folder '$dataRoot', log level $level."
+}
+
 function Install-ErpPdfDriver {
     [CmdletBinding(SupportsShouldProcess)]
     param()
