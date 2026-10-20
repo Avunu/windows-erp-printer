@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.4.0](https://github.com/Avunu/windows-erp-printer/compare/v0.3.0...v0.4.0) (2026-10-20)
+
+
+### Features
+
+* **diagnostics:** trace test prints and log service failures ([#12](https://github.com/Avunu/windows-erp-printer/issues/12)) ([70702f2](https://github.com/Avunu/windows-erp-printer/commit/70702f203af333bef50e45d55c55f31d2e7737cb))
+
 ## [0.3.0](https://github.com/Avunu/windows-erp-printer/compare/v0.2.0...v0.3.0) (2026-10-16)
 
 
