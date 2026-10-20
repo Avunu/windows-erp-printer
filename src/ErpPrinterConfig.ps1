@@ -37,6 +37,7 @@ $script:ProfileSchema = @(Get-ErpPrinterSettingSchema -Scope Profile)
 $script:GlobalSchema = @(Get-ErpPrinterSettingSchema -Scope Global)
 $script:Rendering = $false
 $script:Dirty = $false
+$script:Busy = $false
 $script:ToolTip = New-Object Windows.Forms.ToolTip
 $script:ToolTip.AutoPopDelay = 20000
 
@@ -311,28 +312,83 @@ function Send-TestPage {
         Save-All
         if (-not $script:LastSaveOk) { return }
     }
-    $printerName = $script:State.Profiles[$name].Values.PrinterName
-    $script:TestPageText = @(
-        'ERP Printer test page', '',
-        "Printer:  $printerName", "Profile:  $name", "Computer: $env:COMPUTERNAME",
-        "User:     $env:USERDOMAIN\$env:USERNAME", "Time:     $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')", '',
-        'If this page arrives in your ERP, printing works end to end.'
-    ) -join [Environment]::NewLine
-    $doc = New-Object Drawing.Printing.PrintDocument
-    $doc.DocumentName = "ERP Printer test page - $name"
-    $doc.PrinterSettings.PrinterName = $printerName
-    if (-not $doc.PrinterSettings.IsValid) { throw "Printer '$printerName' does not exist. Save and apply first." }
-    $doc.PrintController = New-Object Drawing.Printing.StandardPrintController
-    $doc.Add_PrintPage({
-            # In WinForms/Drawing event handlers $_ is the EventArgs.
-            $font = New-Object Drawing.Font('Segoe UI', 14)
-            $_.Graphics.DrawString($script:TestPageText, $font, [Drawing.Brushes]::Black, 72, 72)
-            $font.Dispose()
-            $_.HasMorePages = $false
-        })
-    $doc.Print()
-    $doc.Dispose()
-    [Windows.Forms.MessageBox]::Show($form, "Test page sent to '$printerName'. Check the Status tab or your ERP in a few seconds.", 'Print test page', 'OK', 'Information') | Out-Null
+    $script:Busy = $true
+    try {
+        $statusLabel.Text = 'Printing a test page and following it to the ERP...'
+        $result = Invoke-ErpPrinterTestPrint -ProfileName $name -OnProgress {
+            param($message)
+            $statusLabel.Text = $message
+            [Windows.Forms.Application]::DoEvents()
+        }
+    } finally {
+        $script:Busy = $false
+    }
+    Update-Status
+    $statusLabel.Text = if ($result.Success) { 'Test page delivered.' } else { 'Test page did not arrive; see the report.' }
+    Show-ReportDialog -Title "Print test page - $name" -Text $result.Report
+}
+
+function Show-ReportDialog {
+    <# Modal window with selectable report text that can be copied or saved, to send to support. #>
+    param([string] $Title, [string] $Text)
+    $dialog = New-Object Windows.Forms.Form
+    $dialog.Text = $Title
+    $dialog.Size = New-Object Drawing.Size(860, 600)
+    $dialog.MinimumSize = New-Object Drawing.Size(520, 360)
+    $dialog.StartPosition = 'CenterParent'
+    $dialog.Font = $form.Font
+    $box = New-Object Windows.Forms.TextBox
+    $box.Multiline = $true
+    $box.ReadOnly = $true
+    $box.ScrollBars = 'Both'
+    $box.WordWrap = $false
+    $box.Dock = 'Fill'
+    $box.Font = New-Object Drawing.Font('Consolas', 9)
+    $box.Text = $Text
+    $box.BackColor = [Drawing.Color]::White
+    $buttons = New-Object Windows.Forms.FlowLayoutPanel
+    $buttons.Dock = 'Bottom'
+    $buttons.AutoSize = $true
+    $buttons.FlowDirection = 'RightToLeft'
+    $buttons.Padding = New-Object Windows.Forms.Padding(6)
+    $close = New-Object Windows.Forms.Button
+    $close.Text = 'Close'
+    $close.DialogResult = 'OK'
+    $copy = New-Object Windows.Forms.Button
+    $copy.Text = 'Copy to clipboard'
+    $copy.AutoSize = $true
+    $copy.Add_Click({ [Windows.Forms.Clipboard]::SetText($box.Text); $copy.Text = 'Copied' }.GetNewClosure())
+    $save = New-Object Windows.Forms.Button
+    $save.Text = 'Save as...'
+    $save.AutoSize = $true
+    $save.Add_Click({
+            $picker = New-Object Windows.Forms.SaveFileDialog
+            $picker.Filter = 'Text files (*.txt)|*.txt'
+            $picker.FileName = ($Title -replace '[^A-Za-z0-9 _-]', '') + '.txt'
+            if ($picker.ShowDialog($dialog) -eq 'OK') { [IO.File]::WriteAllText($picker.FileName, $box.Text, (New-Object Text.UTF8Encoding $false)) }
+            $picker.Dispose()
+        }.GetNewClosure())
+    $buttons.Controls.AddRange(@($close, $copy, $save))
+    $dialog.Controls.Add($box)
+    $dialog.Controls.Add($buttons)
+    $dialog.AcceptButton = $close
+    $dialog.CancelButton = $close
+    $box.Select(0, 0)
+    [void]$dialog.ShowDialog($form)
+    $dialog.Dispose()
+}
+
+function Show-Diagnostics {
+    $script:Busy = $true
+    try {
+        $statusLabel.Text = 'Running diagnostics...'
+        [Windows.Forms.Application]::DoEvents()
+        $result = Invoke-ErpPrinterDiagnostics
+    } finally {
+        $script:Busy = $false
+    }
+    $statusLabel.Text = if ($result.ReportPath) { "Diagnostics report saved to $($result.ReportPath)" } else { 'Diagnostics finished.' }
+    Show-ReportDialog -Title 'ERP Printer diagnostics' -Text $result.Report
 }
 
 #endregion
@@ -546,6 +602,12 @@ $statusButtons.Controls.Add((New-Button 'Open data folder' {
             if (-not (Test-Path $path)) { $path = $script:State.Global.Values.DataRoot }
             Start-Process explorer.exe $path
         }))
+$statusButtons.Controls.Add((New-Button 'Diagnostics' { Show-Diagnostics }))
+$statusButtons.Controls.Add((New-Button 'Open logs' {
+            $logs = Join-Path $script:State.Global.Values.DataRoot 'logs'
+            if (-not (Test-Path $logs)) { $logs = $script:State.Global.Values.DataRoot }
+            Start-Process explorer.exe $logs
+        }))
 $statusButtons.Controls.Add((New-Button 'Event log' { Start-Process eventvwr.msc '/c:Application' }))
 $statusTab.Controls.Add($statusList)
 $statusTab.Controls.Add($serviceLabel)
@@ -578,7 +640,7 @@ $form.Add_Shown({ $split.SplitterDistance = 220 })
 
 $refreshTimer = New-Object Windows.Forms.Timer
 $refreshTimer.Interval = 5000
-$refreshTimer.Add_Tick({ if ($tabs.SelectedTab -eq $statusTab) { try { Update-Status } catch { $statusLabel.Text = $_.Exception.Message } } })
+$refreshTimer.Add_Tick({ if (-not $script:Busy -and $tabs.SelectedTab -eq $statusTab) { try { Update-Status } catch { $statusLabel.Text = $_.Exception.Message } } })
 $tabs.Add_SelectedIndexChanged({ if ($tabs.SelectedTab -eq $statusTab) { Invoke-Safely { Update-Status } } })
 
 $form.Add_FormClosing({

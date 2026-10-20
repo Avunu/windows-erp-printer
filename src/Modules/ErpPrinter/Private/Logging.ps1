@@ -1,5 +1,6 @@
 $script:ErpLogLevels = @{ Error = 1; Warning = 2; Information = 3; Verbose = 4 }
 $script:ErpLogSettings = $null
+$script:ErpLogFileFailureReported = $false
 
 function Set-ErpLogContext {
     <# Called by long-running entry points so log lines are tagged and levels come from config. #>
@@ -41,7 +42,11 @@ function Write-ErpLog {
             if (-not (Test-Path $script:ErpLogSettings.LogDir)) { New-Item -ItemType Directory -Path $script:ErpLogSettings.LogDir -Force | Out-Null }
             $file = Join-Path $script:ErpLogSettings.LogDir ('{0}-{1:yyyyMMdd}.log' -f $script:ErpLogComponent, (Get-Date))
             [IO.File]::AppendAllText($file, $line + [Environment]::NewLine, [Text.Encoding]::UTF8)
-        } catch { Write-Verbose "Could not write log file: $_" }
+        } catch {
+            Write-Verbose "Could not write log file: $_"
+            # A log that silently stops growing is the worst failure mode, so say so once in the event log.
+            Write-ErpLogFileFailure -Message "Could not write to the log folder '$($script:ErpLogSettings.LogDir)': $($_.Exception.Message)"
+        }
     }
 
     # Event log gets warnings, errors, and information-level delivery events.
@@ -54,6 +59,71 @@ function Write-ErpLog {
             }
         } catch { Write-Verbose "Could not write event log: $_" }
     }
+}
+
+function Write-ErpLogFileFailure {
+    <# Reports (once per process) that the log file cannot be written. #>
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] [string] $Message)
+    if ($script:ErpLogFileFailureReported -or -not $script:ErpIsWindows) { return }
+    $script:ErpLogFileFailureReported = $true
+    try {
+        if ([Diagnostics.EventLog]::SourceExists($script:ErpEventSource)) {
+            [Diagnostics.EventLog]::WriteEntry($script:ErpEventSource, "[$script:ErpLogComponent] $Message", 'Warning', 2001)
+        }
+    } catch { Write-Verbose "Could not write event log: $_" }
+}
+
+function Write-ErpExceptionLog {
+    <#
+    Logs an error at Error level with its type and root cause, and the script stack trace at
+    Verbose level, so a failure that used to vanish leaves enough to find the failing line.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [string] $Message,
+        [Parameter(Mandatory)] $ErrorRecord,
+        [int] $EventId = 0
+    )
+    $ex = if ($ErrorRecord -is [System.Management.Automation.ErrorRecord]) { $ErrorRecord.Exception } else { $ErrorRecord }
+    $detail = "$($ex.Message)"
+    $root = $ex.GetBaseException()
+    if ($root -and $root -ne $ex) { $detail += " (caused by $($root.GetType().Name): $($root.Message))" }
+    Write-ErpLog -Level Error -Message "${Message}: [$($ex.GetType().Name)] $detail" -EventId $EventId
+    if ($ErrorRecord -is [System.Management.Automation.ErrorRecord]) {
+        $stack = "$($ErrorRecord.ScriptStackTrace)".Trim()
+        if ($stack) { Write-ErpLog -Level Verbose -Message ('Stack trace: ' + ($stack -replace '\r?\n', ' | ')) }
+    }
+}
+
+function Get-ErpRecentLogEntries {
+    <#
+    Parses the log lines written in the last -Hours hours from every component's log files,
+    oldest first. -Level keeps only those levels; -Component only that component's files.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)] [string] $LogDir,
+        [int] $Hours = 24,
+        [string[]] $Level = @('Error', 'Warning', 'Information', 'Verbose'),
+        [string] $Component
+    )
+    if (-not (Test-Path -LiteralPath $LogDir -ErrorAction SilentlyContinue)) { return }
+    $since = (Get-Date).AddHours(-$Hours)
+    $pattern = '^(?<time>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}) \[(?<level>\w+)\s*\] \[(?<component>[^\]]*)\] (?<message>.*)$'
+    $files = Get-ChildItem -LiteralPath $LogDir -Filter '*.log' -ErrorAction SilentlyContinue |
+        Where-Object { $_.LastWriteTime -ge $since -and (-not $Component -or $_.Name -like "$Component-*") }
+    $entries = foreach ($file in $files) {
+        try { $lines = [IO.File]::ReadAllLines($file.FullName, [Text.Encoding]::UTF8) } catch { continue }
+        foreach ($line in $lines) {
+            if ($line -notmatch $pattern) { continue }
+            $time = [DateTime]::ParseExact($Matches.time, 'yyyy-MM-dd HH:mm:ss.fff', [Globalization.CultureInfo]::InvariantCulture)
+            if ($time -lt $since -or $Level -notcontains $Matches.level) { continue }
+            [pscustomobject]@{ Time = $time; Level = $Matches.level; Component = $Matches.component; Message = $Matches.message }
+        }
+    }
+    @($entries | Sort-Object Time)
 }
 
 function Remove-ErpOldLogs {
