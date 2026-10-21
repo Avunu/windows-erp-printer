@@ -1,3 +1,10 @@
 /out/
 *.wixpdb
 *.pfx
+
+# .NET
+bin/
+obj/
+*.user
+.vs/
+TestResults/

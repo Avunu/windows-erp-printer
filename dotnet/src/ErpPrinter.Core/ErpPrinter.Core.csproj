@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Portable logic: settings, outbox, backends, diagnostics decisions. No Windows APIs, so it builds and tests anywhere. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>ErpPrinter</RootNamespace>
+    <AssemblyName>ErpPrinter.Core</AssemblyName>
+    <!-- Stamped by the build: msbuild -p:UpdateManifestUrl=... -p:BuildCommit=... (see BuildInfo). -->
+    <UpdateManifestUrl Condition="'$(UpdateManifestUrl)' == ''"></UpdateManifestUrl>
+    <BuildCommit Condition="'$(BuildCommit)' == ''">dev</BuildCommit>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="UpdateManifestUrl" Value="$(UpdateManifestUrl)" />
+    <AssemblyMetadata Include="Commit" Value="$(BuildCommit)" />
+    <InternalsVisibleTo Include="ErpPrinter.Core.Tests" />
+  </ItemGroup>
+</Project>
