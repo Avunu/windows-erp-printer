@@ -58,6 +58,27 @@ function Invoke-ErpPrinterTestPrint {
     } else {
         & $note 'Pass' "Printer '$printerName' is on port '$expectedPort' with driver '$($printer.DriverName)'."
     }
+    $spooler = Get-Service -Name Spooler -ErrorAction SilentlyContinue
+    if (-not $spooler -or $spooler.Status -ne 'Running') { & $note 'Fail' "Print Spooler service: $(if ($spooler) { $spooler.Status } else { 'missing' })." }
+    if ($printer) {
+        $state = Get-ErpPrinterStateInfo -Printer $printer
+        if ($state.Problem) {
+            $evidence.PrinterProblem = $state.Problem
+            $evidence.PrinterHint = $state.Hint
+            & $note 'Fail' $state.Problem
+        } else {
+            & $note 'Pass' "Printer state: $($state.Summary)."
+        }
+        # The spooler works through a queue one job at a time, so an older stuck job blocks the new page.
+        $ahead = @(Get-PrintJob -PrinterName $printerName -ErrorAction SilentlyContinue)
+        $evidence.JobsAhead = $ahead.Count
+        if ($ahead.Count) {
+            $evidence.JobsAheadText = Format-ErpPrintJobList -Jobs $ahead
+            & $note 'Warn' "The print queue already holds $($ahead.Count) job(s): $($evidence.JobsAheadText)."
+        } else {
+            & $note 'Pass' 'The print queue is empty.'
+        }
+    }
     $listenerState = Get-ErpTaskState 'Listener'
     & $note $(if ($listenerState -eq 'Running') { 'Pass' } else { 'Fail' }) "Listener task: $listenerState."
     $uploaderState = Get-ErpTaskState 'Uploader'
@@ -90,6 +111,7 @@ function Invoke-ErpPrinterTestPrint {
     $seenJob = $false
     $jobGone = $false
     $lastStatus = ''
+    $everPrinting = $false
     $badSince = $null
     $receivedId = $null
     $lastProgress = Get-Date
@@ -99,11 +121,12 @@ function Invoke-ErpPrinterTestPrint {
             $status = [string]$job.JobStatus
             if (-not $seenJob) {
                 $seenJob = $true
-                & $note 'Info' "Job $($job.Id) is in the print queue (status '$status')."
+                & $note 'Info' "Job $($job.Id) is in the print queue (status '$status', $($job.Size) bytes, submitted $($job.SubmittedTime))."
             } elseif ($status -ne $lastStatus) {
                 & $note 'Info' "Job $($job.Id) status changed from '$lastStatus' to '$status'."
             }
             $lastStatus = $status
+            if ($status -match 'Printing') { $everPrinting = $true }
             if (Test-ErpBadJobStatus $status) { if (-not $badSince) { $badSince = Get-Date } } else { $badSince = $null }
         } elseif ($seenJob -and -not $jobGone) {
             $jobGone = $true
@@ -153,6 +176,19 @@ function Invoke-ErpPrinterTestPrint {
         $evidence.LastJobStatus = $lastStatus
         $evidence.JobStuck = ($seenJob -and -not $jobGone -and -not $evidence.Received -and -not $evidence.Delivered)
         $evidence.TimedOut = -not ($evidence.Delivered -or $evidence.Failed -or $evidence.LastDeliveryError)
+        $evidence.JobEverPrinting = $everPrinting
+        if ($evidence.JobStuck) {
+            $queueNow = @(Get-PrintJob -PrinterName $printerName -ErrorAction SilentlyContinue)
+            & $note 'Info' "Print queue at the end: $(if ($queueNow.Count) { Format-ErpPrintJobList -Jobs $queueNow } else { 'empty' })."
+            if ($printer) {
+                $printerNow = Get-Printer -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $printerName } | Select-Object -First 1
+                if ($printerNow) {
+                    $stateNow = Get-ErpPrinterStateInfo -Printer $printerNow
+                    & $note $(if ($stateNow.Problem) { 'Fail' } else { 'Info' }) "Printer state at the end: $(if ($stateNow.Problem) { $stateNow.Problem } else { $stateNow.Summary })."
+                    if ($stateNow.Problem -and -not $evidence.PrinterProblem) { $evidence.PrinterProblem = $stateNow.Problem; $evidence.PrinterHint = $stateNow.Hint }
+                }
+            }
+        }
 
         $logInfo = Get-WinEvent -ListLog 'Microsoft-Windows-PrintService/Operational' -ErrorAction SilentlyContinue
         if ($logInfo -and -not $logInfo.IsEnabled) {

@@ -52,6 +52,25 @@ Describe 'Test print verdict' {
         $v.Summary | Should -BeLike '*Nothing is hosting \\.\pipe\x*'
     }
 
+    It 'explains a job that never leaves Normal because an older job is ahead of it' {
+        $v = Get-Verdict @{ Submitted = $true; JobSeen = $true; JobStuck = $true; LastJobStatus = 'Normal'; JobEverPrinting = $false; PipeExists = $true; JobsAhead = 1; JobsAheadText = "job 150 'Old' (Error)" }
+        $v.Stage | Should -Be 'InQueue'
+        $v.Summary | Should -BeLike "*stuck as 'Normal'*"
+        $v.Summary | Should -BeLike "*1 job(s) were already in the queue (job 150 'Old' (Error))*"
+        $v.Hint | Should -BeLike '*Remove-PrintJob*'
+    }
+
+    It 'blames a printer that is paused or offline before anything else' {
+        $v = Get-Verdict @{ Submitted = $true; JobSeen = $true; JobStuck = $true; LastJobStatus = 'Normal'; JobEverPrinting = $false; JobsAhead = 2; JobsAheadText = 'x'; PrinterProblem = 'The spooler reports the printer as Paused.'; PrinterHint = 'Resume it.' }
+        $v.Summary | Should -BeLike '*printer is not ready: The spooler reports the printer as Paused.*'
+        $v.Hint | Should -Be 'Resume it.'
+    }
+
+    It 'says the pipe is not involved when the spooler never starts printing and nothing else explains it' {
+        $v = Get-Verdict @{ Submitted = $true; JobSeen = $true; JobStuck = $true; LastJobStatus = 'Normal'; JobEverPrinting = $false; PipeExists = $true; JobsAhead = 0 }
+        $v.Summary | Should -BeLike "*never reached 'Printing'*never tried to open the pipe*"
+        $v.Hint | Should -BeLike '*Restart-Service Spooler*'
+    }
     It 'catches a spooler that printed to a different port' {
         $v = Get-Verdict @{ Submitted = $true; SpoolerPrinted = $true; SpoolerPort = 'PORTPROMPT:'; ExpectedPort = '\\.\pipe\x' }
         $v.Stage | Should -Be 'Spooled'
