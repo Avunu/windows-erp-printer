@@ -18,3 +18,16 @@ updates:
     commit-message:
       prefix: build
       include: scope
+    # One pull request per package update across all projects, not one per project, so the test projects
+    # never end up on different versions of the same package.
+    groups:
+      nuget:
+        patterns:
+          - "*"
+        group-by: dependency-name
+    ignore:
+      # WiX 6 and later need the Open Source Maintenance Fee EULA accepted (and a paid sponsorship for
+      # revenue-generating use); build/build.ps1 refuses anything but WiX 5 on purpose. Move deliberately.
+      - dependency-name: wix
+        versions:
+          - ">= 6"

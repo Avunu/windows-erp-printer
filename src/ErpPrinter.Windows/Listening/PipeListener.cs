@@ -224,6 +224,7 @@ public sealed class PipeListener
         while (!token.IsCancellationRequested)
         {
             NamedPipeServerStream? pipe = null;
+            MemoryStream? lateClient = null;
             var connected = false;
             try
             {
@@ -259,9 +260,21 @@ public sealed class PipeListener
                     _log.Information($"Waiting for print jobs for '{profile.Name}' on {Naming.PortName(profile.PipeName)} (printer '{profile.PrinterName}'; {visible}).");
                 }
 
-                await pipe.WaitForConnectionAsync(token).ConfigureAwait(false);
+                Stream source = pipe;
+                try
+                {
+                    await pipe.WaitForConnectionAsync(token).ConfigureAwait(false);
+                }
+                catch (IOException ex) when (ex.HResult == ClosedClientReader.ErrorNoDataHResult)
+                {
+                    // The client connected, wrote everything and closed before the wait began: a job small enough to fit in the
+                    // pipe buffer, arriving while this instance was being set up. Its data is still in the pipe; read it instead
+                    // of dropping the job.
+                    lateClient = ClosedClientReader.ReadAll(pipe);
+                    source = lateClient;
+                }
                 connected = true;
-                await ReceiveAsync(worker, pipe, stopping).ConfigureAwait(false);
+                await ReceiveAsync(worker, source, stopping).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested)
             {
@@ -278,12 +291,13 @@ public sealed class PipeListener
             }
             finally
             {
+                lateClient?.Dispose();
                 pipe?.Dispose();
             }
         }
     }
 
-    private async Task ReceiveAsync(PipeWorker worker, NamedPipeServerStream pipe, CancellationToken stopping)
+    private async Task ReceiveAsync(PipeWorker worker, Stream pipe, CancellationToken stopping)
     {
         var profile = worker.Profile;
         _log.Information($"The spooler connected to pipe '{profile.PipeName}'; receiving a job for '{profile.Name}'.");
