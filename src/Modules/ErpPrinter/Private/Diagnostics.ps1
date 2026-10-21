@@ -103,6 +103,54 @@ function Test-ErpFolderReadable {
     catch { $true }
 }
 
+function Get-ErpPrinterStateInfo {
+    <#
+    Whether the spooler will process jobs for a printer at all: paused, offline, "Use Printer
+    Offline", or outside its availability hours all leave jobs waiting with status Normal.
+    Returns Problem (text, or $null when the printer can print), Hint and a one-line Summary.
+    #>
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param([Parameter(Mandatory)] $Printer)
+    $statusText = [string]$Printer.PrinterStatus
+    $cim = Get-CimInstance -ClassName Win32_Printer -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $Printer.Name } | Select-Object -First 1
+    $problem = $null
+    $hint = ''
+    $availability = ''
+    if ($cim -and $cim.WorkOffline) {
+        $problem = 'The printer is set to "Use Printer Offline", so the spooler holds every job and never sends it.'
+        $hint = 'Open the printer queue, Printer menu, and untick "Use Printer Offline".'
+    } elseif ($statusText -and $statusText -notin 'Normal', 'Idle', 'Printing', 'Processing', 'WarmingUp') {
+        $problem = "The spooler reports the printer as $statusText."
+        $hint = 'Open the printer queue and clear that state (Printer menu: untick "Pause Printing" or "Use Printer Offline"); jobs are not sent while it lasts.'
+    } elseif ($cim -and $cim.StartTime -and $cim.UntilTime -and $cim.StartTime -ne $cim.UntilTime) {
+        $from = ([DateTime]$cim.StartTime).TimeOfDay
+        $until = ([DateTime]$cim.UntilTime).TimeOfDay
+        $now = (Get-Date).TimeOfDay
+        $inside = if ($from -le $until) { $now -ge $from -and $now -lt $until } else { $now -ge $from -or $now -lt $until }
+        $availability = " (available {0:hh\:mm}-{1:hh\:mm})" -f $from, $until
+        if (-not $inside) {
+            $problem = "The printer is only available between {0:hh\:mm} and {1:hh\:mm} and it is outside those hours, so the spooler holds jobs." -f $from, $until
+            $hint = 'Printer properties, Advanced tab: choose "Always available".'
+        }
+    }
+    [pscustomobject]@{
+        Problem = $problem
+        Hint    = $hint
+        Summary = "$(if ($statusText) { $statusText } else { 'Normal' })$availability"
+    }
+}
+
+function Format-ErpPrintJobList {
+    <# One-line-per-job description of queue contents. #>
+    [CmdletBinding()]
+    [OutputType([string])]
+    param([object[]] $Jobs, [int] $Max = 5)
+    ($Jobs | Select-Object -First $Max | ForEach-Object {
+            "job $($_.Id) '$($_.DocumentName)' ($($_.JobStatus), submitted $($_.SubmittedTime))"
+        }) -join '; '
+}
+
 function Test-ErpBadJobStatus {
     <# True for spooler job states that mean the job will not reach the port by itself. #>
     [CmdletBinding()]
@@ -354,14 +402,11 @@ function Get-ErpProfileChecks {
         } else {
             New-ErpDiagnosticResult $category 'Windows printer' Pass "'$($printer.Name)' uses driver '$($printer.DriverName)' on port '$($printer.PortName)'."
         }
-        $statusText = [string]$printer.PrinterStatus
-        $cim = Get-CimInstance -ClassName Win32_Printer -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $printer.Name } | Select-Object -First 1
-        if ($cim -and $cim.WorkOffline) {
-            New-ErpDiagnosticResult $category 'Printer state' Fail 'The printer is set to "Use Printer Offline", so the spooler holds every job and never sends it.' 'Open the printer queue, Printer menu, and untick "Use Printer Offline".'
-        } elseif ($statusText -and $statusText -notin 'Normal', 'Idle', 'Printing', 'Processing', 'WarmingUp') {
-            New-ErpDiagnosticResult $category 'Printer state' Fail "The spooler reports the printer as $statusText." 'Resolve that state (offline, error, paused) in the printer queue; jobs are not sent while it lasts.'
+        $state = Get-ErpPrinterStateInfo -Printer $printer
+        if ($state.Problem) {
+            New-ErpDiagnosticResult $category 'Printer state' Fail $state.Problem $state.Hint
         } else {
-            New-ErpDiagnosticResult $category 'Printer state' Pass $(if ($statusText) { $statusText } else { 'Normal' })
+            New-ErpDiagnosticResult $category 'Printer state' Pass $state.Summary
         }
         $port = Get-PrinterPort -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $expectedPort } | Select-Object -First 1
         if (-not $port) {
@@ -487,7 +532,8 @@ function Get-ErpTestPrintVerdict {
     Stages, in order: None, Submitted, InQueue, Spooled, Received, Delivered.
     Evidence keys: Submitted, JobSeen, LastJobStatus, JobStuck, JobGone, SpoolerPrinted,
     SpoolerPort, ExpectedPort, PipeExists, ListenerConnected, ListenerError, Received,
-    LastDeliveryError, Failed, FailedError, Delivered.
+    LastDeliveryError, Failed, FailedError, Delivered, JobEverPrinting, JobsAhead, JobsAheadText,
+    PrinterProblem, PrinterHint.
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
@@ -518,7 +564,19 @@ function Get-ErpTestPrintVerdict {
     if (& $has 'JobStuck') {
         $port = if ($e.Contains('ExpectedPort')) { $e.ExpectedPort } else { 'the pipe' }
         $pipeNote = if ($e.Contains('PipeExists') -and $e.PipeExists -eq $false) { " Nothing is hosting ${port}: the listener is not running or has not opened it." } else { '' }
-        return & $make 'InQueue' $false "The spooler accepted the page but could not hand it over; the job is stuck as '$($e.LastJobStatus)'.$pipeNote" 'Make sure the Listener task is running and the pipe is visible, that the printer is not set offline, and read the Print Spooler Admin log for the exact port error. Then delete the stuck job and try again.'
+        $neverPrinting = $e.Contains('JobEverPrinting') -and -not $e.JobEverPrinting
+        $why = ''
+        if ($e.Contains('PrinterProblem') -and $e.PrinterProblem) { $why += " The printer is not ready: $($e.PrinterProblem)" }
+        $ahead = if ($e.Contains('JobsAhead')) { [int]$e.JobsAhead } else { 0 }
+        if ($ahead -gt 0) {
+            $why += " $ahead job(s) were already in the queue ($($e.JobsAheadText)); the spooler prints one job at a time per queue, so an older stuck job blocks this page."
+        }
+        if ($neverPrinting -and -not $why) { $why = " The job never reached 'Printing', so the spooler never tried to open the pipe." }
+        $hint = 'Make sure the Listener task is running and the pipe is visible, that the printer is not set offline, and read the Print Spooler Admin log for the exact port error. Then delete the stuck job and try again.'
+        if ($e.Contains('PrinterProblem') -and $e.PrinterProblem) { $hint = $e.PrinterHint }
+        elseif ($ahead -gt 0) { $hint = 'Delete the older job(s) (Get-PrintJob -PrinterName <printer> | Remove-PrintJob) and print again. If they will not delete or come back, restart the Print Spooler service (Restart-Service Spooler).' }
+        elseif ($neverPrinting) { $hint = "Nothing in the printer state or queue explains it, and the pipe is not involved yet. Restart the Print Spooler service (Restart-Service Spooler) and try again. If the job still sits at '$($e.LastJobStatus)', check Event Viewer (PrintService Admin, and System for Print Spooler faults) and whether 'Microsoft Print to PDF' prints to a file on this machine." }
+        return & $make 'InQueue' $false "The spooler accepted the page but never handed it to the printer port; the job is stuck as '$($e.LastJobStatus)'.$why$pipeNote" $hint
     }
     if (& $has 'SpoolerPrinted') {
         $port = if ($e.Contains('SpoolerPort') -and $e.SpoolerPort) { " to '$($e.SpoolerPort)'" } else { '' }

@@ -36,6 +36,7 @@ Describe 'Invoke-ErpPrinterTestPrint' {
         Mock -ModuleName ErpPrinter Get-Printer { [pscustomobject]@{ Name = 'Send to Odoo'; PortName = $script:Port; DriverName = 'Microsoft Print To PDF' } }
         Mock -ModuleName ErpPrinter Get-ErpTaskState { 'Running' }
         Mock -ModuleName ErpPrinter Test-ErpPipeExists { $true }
+        Mock -ModuleName ErpPrinter Get-ErpPrinterStateInfo { [pscustomobject]@{ Problem = $null; Hint = ''; Summary = 'Normal' } }
         Mock -ModuleName ErpPrinter Get-WinEvent { [pscustomobject]@{ IsEnabled = $true } }
         Mock -ModuleName ErpPrinter Get-ErpPrintServiceEvents { @() }
         Mock -ModuleName ErpPrinter Get-ErpRecentLogEntries { @() }
@@ -54,6 +55,7 @@ Describe 'Invoke-ErpPrinterTestPrint' {
             }
         }
         Mock -ModuleName ErpPrinter Get-PrintJob {
+            if (-not $script:SentToken) { return }
             $script:PollCount++
             # The uploader delivers the document while the job is leaving the queue.
             if ($script:PollCount -eq 3) { Get-ChildItem $script:Outbox | Remove-Item -Force }
@@ -81,9 +83,38 @@ Describe 'Invoke-ErpPrinterTestPrint' {
         $result.Report | Should -BeLike '*Nothing is hosting*'
     }
 
+    It 'finds the older job that blocks a page sitting at Normal' {
+        Mock -ModuleName ErpPrinter Send-ErpTestPage { $script:SentToken = $Token }
+        Mock -ModuleName ErpPrinter Get-PrintJob {
+            $old = [pscustomobject]@{ Id = 150; DocumentName = 'Old report'; JobStatus = 'Error'; SubmittedTime = Get-Date; Size = 10 }
+            if ($script:SentToken) {
+                @($old, [pscustomobject]@{ Id = 151; DocumentName = "ERP Printer test page [$($script:SentToken)]"; JobStatus = 'Normal'; SubmittedTime = Get-Date; Size = 4000 })
+            } else { $old }
+        }
+        $result = Invoke-ErpPrinterTestPrint -ProfileName 'Send to Odoo' -TimeoutSeconds 5
+        $result.Success | Should -BeFalse
+        $result.Stage | Should -Be 'InQueue'
+        $result.Evidence.JobsAhead | Should -Be 1
+        $result.Evidence.JobEverPrinting | Should -BeFalse
+        $result.Summary | Should -BeLike "*stuck as 'Normal'*"
+        $result.Summary | Should -BeLike "*job 150 'Old report'*"
+        $result.Report | Should -BeLike '*print queue already holds 1 job(s)*'
+    }
+
+    It 'reports a printer that is paused when the page sits at Normal' {
+        Mock -ModuleName ErpPrinter Get-ErpPrinterStateInfo { [pscustomobject]@{ Problem = 'The spooler reports the printer as Paused.'; Hint = 'Resume it.'; Summary = 'Paused' } }
+        Mock -ModuleName ErpPrinter Send-ErpTestPage { $script:SentToken = $Token }
+        Mock -ModuleName ErpPrinter Get-PrintJob {
+            if ($script:SentToken) { [pscustomobject]@{ Id = 5; DocumentName = "ERP Printer test page [$($script:SentToken)]"; JobStatus = 'Normal'; SubmittedTime = Get-Date; Size = 1 } }
+        }
+        $result = Invoke-ErpPrinterTestPrint -ProfileName 'Send to Odoo' -TimeoutSeconds 5
+        $result.Summary | Should -BeLike '*printer is not ready: The spooler reports the printer as Paused.*'
+        $result.Hint | Should -Be 'Resume it.'
+    }
     It 'reports a spooler that printed to the wrong port' {
         Mock -ModuleName ErpPrinter Send-ErpTestPage { $script:SentToken = $Token }
         Mock -ModuleName ErpPrinter Get-PrintJob {
+            if (-not $script:SentToken) { return }
             $script:PollCount++
             if ($script:PollCount -lt 3) { [pscustomobject]@{ Id = 3; DocumentName = "ERP Printer test page [$($script:SentToken)]"; JobStatus = 'Printing' } }
         }
