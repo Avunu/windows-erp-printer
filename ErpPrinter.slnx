@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ErpPrinter.Cli/ErpPrinter.Cli.csproj" />
+    <Project Path="src/ErpPrinter.Config/ErpPrinter.Config.csproj" />
+    <Project Path="src/ErpPrinter.Core/ErpPrinter.Core.csproj" />
+    <Project Path="src/ErpPrinter.Service/ErpPrinter.Service.csproj" />
+    <Project Path="src/ErpPrinter.Windows/ErpPrinter.Windows.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ErpPrinter.Config.Tests/ErpPrinter.Config.Tests.csproj" />
+    <Project Path="tests/ErpPrinter.Core.Tests/ErpPrinter.Core.Tests.csproj" />
+    <Project Path="tests/ErpPrinter.Windows.Tests/ErpPrinter.Windows.Tests.csproj" />
+  </Folder>
+</Solution>

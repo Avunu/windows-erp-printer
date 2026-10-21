@@ -9,3 +9,12 @@ updates:
     commit-message:
       prefix: ci
       include: scope
+  - package-ecosystem: nuget
+    directories:
+      - /src/*
+      - /tests/*
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: build
+      include: scope

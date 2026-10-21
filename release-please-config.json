@@ -10,8 +10,7 @@
       "bump-minor-pre-major": true,
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
-        "src/Modules/ErpPrinter/ErpPrinter.psd1",
-        "src/Modules/ErpPrinter/BuildInfo.psd1"
+        "Directory.Build.props"
       ]
     }
   }
