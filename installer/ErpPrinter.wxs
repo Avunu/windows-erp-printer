@@ -1,11 +1,20 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  ERP Printer MSI (WiX Toolset v5). Built by build/build.ps1, roughly:
+  ERP Printer MSI (WiX Toolset v5). Built by build/build.ps1 -Task Msi, roughly:
 
-    wix build installer/ErpPrinter.wxs -arch x64 -ext WixToolset.Util.wixext
-        -d Version=1.2.3 -d PayloadDir=<absolute path to staged files> -o out/ErpPrinter-1.2.3-x64.msi
+    dotnet tool run wix build installer/ErpPrinter.wxs -arch x64 -ext WixToolset.Util.wixext
+        -d Version=1.2.3 -d PayloadDir=<folder from build/Publish.ps1> -d IconFile=<path to erp-printer.ico>
+        -o out/ErpPrinter-1.2.3-x64.msi
 
-  Public properties seed configuration on install (msiexec /i ErpPrinter.msi /qn NAME=value ...):
+  The UpgradeCode is the one the earlier PowerShell releases used, so this package upgrades an installation of
+  those in place: there is one "ERP Printer" in Apps & features, never two products fighting over the same printers
+  and data. That is safe because every PowerShell MSI ever shipped skips its deprovision action when it is being
+  replaced (Condition NOT UPGRADINGPRODUCTCODE), so printers, ports, registry configuration, secrets and the outbox
+  survive. The provision action then switches the installation over to the service and removes the old
+  scheduled tasks (see docs/upgrading.md). Never change the UpgradeCode.
+
+  Public properties seed configuration on install (msiexec /i ErpPrinter.msi /qn NAME=value ...); they are passed
+  to "erpprinter.exe install" as Name=Value pairs:
     PROFILE_NAME         printer/profile name (default "Send to ERP")
     BACKEND              OdooJson2 | OdooJsonRpc | ERPNext | Webhook
     SERVER_URL           creates/updates the profile when set
@@ -16,11 +25,15 @@
     LAUNCHCONFIG         0 to not open the configuration window after an interactive install
     PURGE                1 on uninstall to also delete configuration and spooled documents
 
-  Upgrades are major upgrades. The deprovision action is skipped during an upgrade so
-  printers, tasks and configuration survive; the provision action is idempotent.
+  Upgrades are major upgrades scheduled after InstallInitialize: the installed product is removed first (its service
+  is stopped and deleted), then this one is installed. The deprovision action is skipped during an upgrade and the
+  provision action is idempotent.
 -->
 <?ifndef ProjectUrl ?>
 <?define ProjectUrl = "https://github.com" ?>
+<?endif?>
+<?ifndef IconFile ?>
+<?define IconFile = "$(PayloadDir)\erp-printer.ico" ?>
 <?endif?>
 <!-- The util extension's custom action DLL for the x64 package (WiX 5 has no arch-name
      preprocessor variable; the IDs are Wix4UtilCA_X86, Wix4UtilCA_X64 and Wix4UtilCA_A64). -->
@@ -28,7 +41,7 @@
 <?ifndef Manufacturer ?>
 <?define Manufacturer = "ERP Printer Project" ?>
 <?endif?>
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Package Name="ERP Printer"
            Manufacturer="$(Manufacturer)"
            Version="$(Version)"
@@ -42,7 +55,10 @@
                   DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
-    <Icon Id="AppIcon" SourceFile="$(PayloadDir)\erp-printer.ico" />
+    <!-- .NET 10 needs Windows 10 1607 / Server 2016 or later (VersionNT 1000); a running installation is never blocked. -->
+    <Launch Condition="Installed OR VersionNT64 &gt;= 1000" Message="[ProductName] requires Windows 10 or Windows Server 2016 or later (64-bit)." />
+
+    <Icon Id="AppIcon" SourceFile="$(IconFile)" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon" />
     <Property Id="ARPNOMODIFY" Value="1" />
     <Property Id="ARPURLINFOABOUT" Value="$(ProjectUrl)" />
@@ -68,16 +84,49 @@
       <Directory Id="AppMenuFolder" Name="ERP Printer" />
     </StandardDirectory>
 
+    <!-- Everything build/Publish-Dotnet.ps1 produced, except the service executable, which is declared below
+         so it can carry the service registration. -->
     <ComponentGroup Id="Payload" Directory="INSTALLFOLDER">
-      <Files Include="$(PayloadDir)\**" />
+      <Files Include="$(PayloadDir)\**">
+        <Exclude Files="$(PayloadDir)\ErpPrinterService.exe" />
+      </Files>
     </ComponentGroup>
 
+    <!-- The Windows service "ErpPrinter" ("ERP Printer"): automatic start (not delayed, so the print pipe is up before
+         anyone prints), LocalSystem, restarted by the SCM after a crash. There is deliberately no dependency on the
+         Print Spooler: stopping the spooler (a routine troubleshooting step) would stop a dependent service and
+         nothing would start it again; the service waits for the spooler itself. -->
+    <Component Id="ServiceExecutable" Directory="INSTALLFOLDER" Bitness="always64">
+      <File Id="ErpPrinterService.exe" Source="$(PayloadDir)\ErpPrinterService.exe" KeyPath="yes" />
+      <ServiceInstall Id="ErpPrinterServiceInstall"
+                      Name="ErpPrinter"
+                      DisplayName="ERP Printer"
+                      Description="Receives print jobs from the ERP Printer queues, delivers the documents to the configured ERP with retries, and checks for updates."
+                      Type="ownProcess"
+                      Start="auto"
+                      ErrorControl="normal"
+                      Account="LocalSystem"
+                      Vital="yes">
+        <!-- Recovery: restart after 1 minute on the first, second and later failures; the failure count resets after a day. -->
+        <util:ServiceConfig FirstFailureActionType="restart"
+                            SecondFailureActionType="restart"
+                            ThirdFailureActionType="restart"
+                            RestartServiceDelayInSeconds="60"
+                            ResetPeriodInDays="1" />
+      </ServiceInstall>
+      <!-- Stop before files are replaced or removed, and wait for it; delete the service on uninstall. -->
+      <ServiceControl Id="ErpPrinterServiceStop" Name="ErpPrinter" Stop="both" Remove="uninstall" Wait="yes" />
+      <!-- Start after install/upgrade, but do not fail the installation if the start itself is slow or refused:
+           the recovery actions and "erpprinter status" surface that. -->
+      <ServiceControl Id="ErpPrinterServiceStart" Name="ErpPrinter" Start="install" Wait="no" />
+    </Component>
+
     <Component Id="StartMenuShortcut" Directory="AppMenuFolder">
+      <!-- Same name and folder as the PowerShell product's shortcut, so there is one Start menu entry before and after an upgrade. -->
       <Shortcut Id="ConfigShortcut"
                 Name="ERP Printer Configuration"
                 Description="Configure ERP Printer queues and connections"
-                Target="[System64Folder]WindowsPowerShell\v1.0\powershell.exe"
-                Arguments="-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File &quot;[INSTALLFOLDER]ErpPrinterConfig.ps1&quot; -HideConsole"
+                Target="[INSTALLFOLDER]ErpPrinterConfig.exe"
                 WorkingDirectory="INSTALLFOLDER"
                 Icon="AppIcon" />
       <RemoveFolder Id="RemoveAppMenuFolder" On="uninstall" />
@@ -88,18 +137,25 @@
 
     <Feature Id="Main" Title="ERP Printer" Level="1">
       <ComponentGroupRef Id="Payload" />
+      <ComponentRef Id="ServiceExecutable" />
       <ComponentRef Id="StartMenuShortcut" />
     </Feature>
 
-    <!-- Provision (install, upgrade, repair): runs ErpPrinter.ps1 -Command Install as SYSTEM. -->
+    <!-- Provision (install, upgrade, repair): "erpprinter.exe install" as SYSTEM. It is idempotent: writes the
+         configuration seeded from the properties, creates the data folder and secrets key, provisions the printer
+         queues, removes the PowerShell product's scheduled tasks and Start menu shortcut, and registers the event
+         source. The MSI owns the service itself (ServiceInstall/ServiceControl above), so the command does not
+         need to install it. It runs after the service is registered but before StartServices, so the legacy
+         listener has released the printer pipes before the new service opens them. -->
     <SetProperty Id="CA_Provision" Sequence="execute" Before="CA_Provision"
-                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]ErpPrinter.ps1&quot; -Command Install &quot;ProfileName=[PROFILE_NAME]&quot; &quot;Backend=[BACKEND]&quot; &quot;ServerUrl=[SERVER_URL]&quot; &quot;Database=[DATABASE]&quot; &quot;Username=[USERNAME]&quot; &quot;ApiKey=[API_KEY]&quot; &quot;ApiSecret=[API_SECRET]&quot; &quot;AutoUpdate=[AUTO_UPDATE]&quot; &quot;UpdateManifestUrl=[UPDATE_MANIFEST_URL]&quot;" />
+                 Value="&quot;[INSTALLFOLDER]erpprinter.exe&quot; install &quot;ProfileName=[PROFILE_NAME]&quot; &quot;Backend=[BACKEND]&quot; &quot;ServerUrl=[SERVER_URL]&quot; &quot;Database=[DATABASE]&quot; &quot;Username=[USERNAME]&quot; &quot;ApiKey=[API_KEY]&quot; &quot;ApiSecret=[API_SECRET]&quot; &quot;AutoUpdate=[AUTO_UPDATE]&quot; &quot;UpdateManifestUrl=[UPDATE_MANIFEST_URL]&quot;" />
     <CustomAction Id="CA_Provision" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec"
                   Execute="deferred" Impersonate="no" Return="check" HideTarget="yes" />
 
-    <!-- Deprovision (real uninstall only): removes tasks, printers and ports. -->
+    <!-- Deprovision (real uninstall only): removes printers and ports, and with PURGE=1 the data and configuration.
+         Runs once the service has been stopped, before the files are removed. -->
     <SetProperty Id="CA_Deprovision" Sequence="execute" Before="CA_Deprovision"
-                 Value="&quot;[System64Folder]WindowsPowerShell\v1.0\powershell.exe&quot; -NoProfile -NonInteractive -ExecutionPolicy Bypass -File &quot;[INSTALLFOLDER]ErpPrinter.ps1&quot; -Command Uninstall &quot;Purge=[PURGE]&quot;" />
+                 Value="&quot;[INSTALLFOLDER]erpprinter.exe&quot; uninstall &quot;Purge=[PURGE]&quot;" />
     <CustomAction Id="CA_Deprovision" BinaryRef="$(UtilCA)" DllEntry="WixQuietExec"
                   Execute="deferred" Impersonate="no" Return="ignore" />
 
@@ -110,8 +166,8 @@
                   Execute="immediate" Impersonate="yes" Return="ignore" />
 
     <InstallExecuteSequence>
-      <Custom Action="CA_Deprovision" Before="RemoveFiles" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
-      <Custom Action="CA_Provision" Before="InstallFinalize" Condition="NOT REMOVE=&quot;ALL&quot;" />
+      <Custom Action="CA_Deprovision" After="StopServices" Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+      <Custom Action="CA_Provision" After="InstallServices" Condition="NOT REMOVE=&quot;ALL&quot;" />
       <Custom Action="CA_LaunchConfig" After="InstallFinalize" Condition="UILevel &gt;= 4 AND LAUNCHCONFIG=&quot;1&quot; AND NOT REMOVE" />
     </InstallExecuteSequence>
   </Package>

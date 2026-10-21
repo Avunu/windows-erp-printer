@@ -11,8 +11,8 @@ updates:
       include: scope
   - package-ecosystem: nuget
     directories:
-      - /dotnet/src/*
-      - /dotnet/tests/*
+      - /src/*
+      - /tests/*
     schedule:
       interval: weekly
     commit-message:

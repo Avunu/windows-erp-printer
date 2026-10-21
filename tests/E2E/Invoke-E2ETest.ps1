@@ -1,10 +1,11 @@
 <#
 .SYNOPSIS
     End-to-end test on a disposable Windows machine (the CI runner): installs the MSI with a
-    webhook profile, prints a page, waits for the PDF to arrive at a local webhook, checks
-    status and retries, then uninstalls and verifies cleanup.
+    webhook profile, prints a page through the real spooler, waits for the PDF to arrive at a
+    local webhook, checks the retry path and the diagnostics, then uninstalls and verifies cleanup.
 .NOTES
-    Must run elevated in Windows PowerShell 5.1. Leaves diagnostics in -ArtifactDir.
+    Must run elevated. Run it only on a disposable machine: it installs the product, creates a
+    printer and removes them again. Leaves diagnostics in -ArtifactDir.
 #>
 [CmdletBinding()]
 param(
@@ -21,7 +22,9 @@ $MsiPath = (Resolve-Path $MsiPath).Path
 $profileName = 'E2E Printer'
 $printerName = 'E2E Printer'
 $installDir = Join-Path $env:ProgramFiles 'ERP Printer'
+$cli = Join-Path $installDir 'erpprinter.exe'
 $dataRoot = Join-Path $env:ProgramData 'ErpPrinter'
+$outbox = Join-Path $dataRoot 'spool\E2E_Printer\outbox'
 
 function Assert-True([bool] $Condition, [string] $Message) {
     if (-not $Condition) { throw "ASSERTION FAILED: $Message" }
@@ -42,6 +45,8 @@ function Invoke-Msi([string[]] $Arguments, [string] $LogName) {
     $process = Start-Process msiexec.exe -ArgumentList ($Arguments + @('/qn', '/norestart', '/l*v', "`"$log`"")) -Wait -PassThru
     if ($process.ExitCode -notin 0, 3010) { throw "msiexec $($Arguments -join ' ') failed with $($process.ExitCode); see $log" }
 }
+
+function Get-OutboxCount { @(Get-ChildItem -LiteralPath $outbox -Filter '*.json' -ErrorAction SilentlyContinue).Count }
 
 # --- Webhook receiver ----------------------------------------------------------------
 $tcp = New-Object Net.Sockets.TcpListener([Net.IPAddress]::Loopback, 0)
@@ -72,20 +77,21 @@ try {
     Write-Output '== Install'
     Invoke-Msi @('/i', "`"$MsiPath`"", "PROFILE_NAME=`"$profileName`"", 'BACKEND=Webhook', "SERVER_URL=http://127.0.0.1:$port/hook",
         'API_KEY=e2e-secret', 'AUTO_UPDATE=0', 'LAUNCHCONFIG=0') 'install.log'
-    Assert-True (Test-Path (Join-Path $installDir 'ErpPrinter.ps1')) 'files are installed'
-    Import-Module (Join-Path $installDir 'Modules\ErpPrinter\ErpPrinter.psd1') -Force
+    Assert-True (Test-Path $cli) 'files are installed'
+    Assert-True (Test-Path (Join-Path $installDir 'ErpPrinterService.exe')) 'the service executable is installed'
 
     $printer = Get-Printer -Name $printerName -ErrorAction SilentlyContinue
     Assert-True ($null -ne $printer) "printer '$printerName' exists"
     Assert-True ($printer.PortName -eq '\\.\pipe\ErpPrinter-E2E_Printer') "printer uses the pipe port ($($printer.PortName))"
     Assert-True ($printer.DriverName -eq 'Microsoft Print To PDF') 'printer uses the Print to PDF driver'
-    foreach ($task in 'Listener', 'Uploader', 'Updater') {
-        Assert-True ($null -ne (Get-ScheduledTask -TaskPath '\ERP Printer\' -TaskName $task -ErrorAction SilentlyContinue)) "task $task is registered"
-    }
-    Wait-Until { (Get-ScheduledTask -TaskPath '\ERP Printer\' -TaskName 'Listener').State -eq 'Running' } 30 'listener task running'
-    Assert-True (Test-ErpPrinterSecret -ProfileName $profileName -Name ApiKey) 'API key is stored encrypted'
-    $connection = Test-ErpPrinterConnection -ProfileName $profileName
-    Assert-True $connection.Success "connection test succeeds ($($connection.Message))"
+    $service = Get-Service -Name ErpPrinter -ErrorAction SilentlyContinue
+    Assert-True ($null -ne $service) 'the ErpPrinter Windows service is installed'
+    Assert-True ($service.StartType -eq 'Automatic') 'the service starts automatically'
+    Wait-Until { (Get-Service -Name ErpPrinter).Status -eq 'Running' } 60 'the service to be running'
+    Assert-True ($null -eq (Get-ScheduledTask -TaskPath '\ERP Printer\' -ErrorAction SilentlyContinue)) 'no legacy scheduled tasks'
+    Assert-True ((& $cli secret status $profileName) -match 'ApiKey: stored') 'API key is stored encrypted'
+    $null = & $cli test $profileName
+    Assert-True ($LASTEXITCODE -eq 0) 'connection test succeeds'
 
     Write-Output '== Print'
     $received.Requests.Clear()
@@ -103,25 +109,32 @@ try {
     Assert-True ($request.Body -match [regex]::Escape($env:USERNAME)) 'metadata carries the printing user'
     Assert-True ([bool]$request.Key) 'request has an idempotency key'
 
+    Write-Output '== Test print (follows a page hop by hop)'
+    $testPrint = & $cli testprint $profileName --timeout 90
+    $testPrint | Out-File (Join-Path $ArtifactDir 'testprint.txt')
+    Assert-True ($LASTEXITCODE -eq 0) 'erpprinter testprint reports the page delivered'
+
     Write-Output '== Retry path'
     $received.Status = 500
     $received.Requests.Clear()
     $doc.DocumentName = 'E2E Retry'
     $doc.Print()
-    Wait-Until { @(Get-ErpPrinterStatus).Profiles[0].Pending -ge 1 -and $received.Requests.Count -ge 1 } $TimeoutSeconds 'a failed attempt to be queued for retry'
+    Wait-Until { (Get-OutboxCount) -ge 1 -and $received.Requests.Count -ge 1 } $TimeoutSeconds 'a failed attempt to be queued for retry'
     $received.Status = 200
-    Invoke-ErpPrinterUpload -Force | Out-Null
-    Wait-Until { (Get-ErpPrinterStatus).Profiles[0].Pending -eq 0 } 30 'the retried document to be delivered'
+    $null = & $cli upload --once --force
+    Wait-Until { (Get-OutboxCount) -eq 0 } 60 'the retried document to be delivered'
     Assert-True ((@($received.Requests | Where-Object { $_.Body -match 'E2E Retry' })).Count -ge 2) 'document was retried after a server error'
 
-    Write-Output '== Status'
-    & (Join-Path $installDir 'ErpPrinter.ps1') -Command Status | Tee-Object -FilePath (Join-Path $ArtifactDir 'status.txt')
+    Write-Output '== Status and diagnostics'
+    & $cli status | Tee-Object -FilePath (Join-Path $ArtifactDir 'status.txt')
+    & $cli diagnose --skip-connection | Out-File (Join-Path $ArtifactDir 'diagnose.txt')
+    Assert-True ($LASTEXITCODE -eq 0) 'erpprinter diagnose finds nothing failing'
 
     Write-Output '== Uninstall'
     Invoke-Msi @('/x', "`"$MsiPath`"") 'uninstall.log'
     Assert-True ($null -eq (Get-Printer -Name $printerName -ErrorAction SilentlyContinue)) 'printer removed'
-    Assert-True ($null -eq (Get-ScheduledTask -TaskPath '\ERP Printer\' -ErrorAction SilentlyContinue)) 'tasks removed'
-    Assert-True (-not (Test-Path (Join-Path $installDir 'ErpPrinter.ps1'))) 'files removed'
+    Assert-True ($null -eq (Get-Service -Name ErpPrinter -ErrorAction SilentlyContinue)) 'service removed'
+    Assert-True (-not (Test-Path $cli)) 'files removed'
     Assert-True (Test-Path 'HKLM:\SOFTWARE\ErpPrinter\Printers') 'configuration kept without PURGE=1'
     Write-Output 'E2E PASSED'
 } finally {
