@@ -163,3 +163,5 @@ See [docs/development.md](docs/development.md). In short:
 ```
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/); release-please turns them into version bumps, [CHANGELOG.md](CHANGELOG.md) and GitHub releases. See [development.md](docs/development.md#releases).
+
+A C# (.NET 10) port of the product is under way in `dotnet/`; see [docs/dotnet-port.md](docs/dotnet-port.md) for its status, build and packaging.
