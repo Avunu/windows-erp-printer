@@ -89,7 +89,8 @@ try {
     Assert-True ($service.StartType -eq 'Automatic') 'the service starts automatically'
     Wait-Until { (Get-Service -Name ErpPrinter).Status -eq 'Running' } 60 'the service to be running'
     Assert-True ($null -eq (Get-ScheduledTask -TaskPath '\ERP Printer\' -ErrorAction SilentlyContinue)) 'no legacy scheduled tasks'
-    Assert-True ((& $cli secret status $profileName) -match 'ApiKey: stored') 'API key is stored encrypted'
+    # -match on a multi-line output returns the matching lines, not a boolean, so join it first.
+    Assert-True (((& $cli secret status $profileName) -join "`n") -match 'ApiKey: stored') 'API key is stored encrypted'
     $null = & $cli test $profileName
     Assert-True ($LASTEXITCODE -eq 0) 'connection test succeeds'
 
