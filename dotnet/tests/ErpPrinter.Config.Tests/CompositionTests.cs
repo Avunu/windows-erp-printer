@@ -6,9 +6,16 @@ namespace ErpPrinter.Config.Tests;
 public class CompositionTests
 {
     [Fact]
-    public void The_windows_composition_is_absent_until_WindowsConfigActions_is_added() =>
-        // When ErpPrinter.Config.WindowsConfigActions exists, this test must be replaced by one that checks its Create() contract.
-        Assert.Null(Composition.TryCreateWindows());
+    public void The_windows_composition_exists_and_honours_the_Create_contract()
+    {
+        // Calling Create() would open the real HKLM configuration, so check the contract the loader relies on instead.
+        var type = typeof(Composition).Assembly.GetType(Composition.WindowsActionsTypeName);
+        Assert.NotNull(type);
+        Assert.True(typeof(IConfigActions).IsAssignableFrom(type));
+        var create = type.GetMethod("Create", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static, Type.EmptyTypes);
+        Assert.NotNull(create);
+        Assert.Equal(typeof(ConfigComposition), create.ReturnType);
+    }
 
     [Fact]
     public void The_demo_composition_has_sample_printers_policy_values_and_stored_secrets()
