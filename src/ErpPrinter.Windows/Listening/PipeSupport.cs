@@ -10,10 +10,22 @@ namespace ErpPrinter.Windows.Listening;
 /// <summary>Creates the pipe instances the listener hosts (<c>New-ErpPipeServer</c>).</summary>
 public static class PipeServerFactory
 {
+    /// <summary>SID of the "Authenticated Users" group, which every printing user belongs to.</summary>
+    public const string AuthenticatedUsersSid = "S-1-5-11";
+
     /// <summary>
-    /// An inbound, asynchronous, single-instance byte pipe with 64 KiB buffers. The spooler may open the port as SYSTEM or while
-    /// impersonating the printing user, so SYSTEM and Administrators get full control and authenticated users read/write access.
-    /// Accounts are given by SID so this works on localized Windows.
+    /// What printing users need on the pipe. The spooler opens the port while impersonating the user who printed and asks for
+    /// <c>DELETE</c> access as well as write access; without <c>Delete</c> the open fails, the job goes to "Error, Printing" and
+    /// nothing reaches the listener. Administrators have full control anyway, which is why elevated test prints still worked.
+    /// Deliberately not granted: <c>CreateNewInstance</c> (would let a user host a fake listener) and the permission rights.
+    /// </summary>
+    public const PipeAccessRights PrintingUserRights =
+        PipeAccessRights.ReadWrite | PipeAccessRights.Delete | PipeAccessRights.Synchronize;
+
+    /// <summary>
+    /// An inbound, asynchronous, single-instance byte pipe with 64 KiB buffers. The spooler opens the port as SYSTEM or while
+    /// impersonating the printing user, so SYSTEM and Administrators get full control and authenticated users
+    /// <see cref="PrintingUserRights"/>. Accounts are given by SID so this works on localized Windows.
     /// </summary>
     public static NamedPipeServerStream Create(string pipeName)
     {
@@ -21,7 +33,7 @@ public static class PipeServerFactory
         foreach (var sid in new[] { "S-1-5-18", "S-1-5-32-544" })
             security.AddAccessRule(new PipeAccessRule(new SecurityIdentifier(sid), PipeAccessRights.FullControl, AccessControlType.Allow));
         security.AddAccessRule(new PipeAccessRule(
-            new SecurityIdentifier("S-1-5-11"), PipeAccessRights.ReadWrite | PipeAccessRights.Synchronize, AccessControlType.Allow));
+            new SecurityIdentifier(AuthenticatedUsersSid), PrintingUserRights, AccessControlType.Allow));
         return NamedPipeServerStreamAcl.Create(
             pipeName, PipeDirection.In, 1, PipeTransmissionMode.Byte, PipeOptions.Asynchronous, 65536, 65536, security);
     }

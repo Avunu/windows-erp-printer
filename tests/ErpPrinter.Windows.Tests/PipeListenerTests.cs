@@ -1,4 +1,6 @@
 using System.IO.Pipes;
+using System.Security.AccessControl;
+using System.Security.Principal;
 using ErpPrinter.Logging;
 using ErpPrinter.Outbox;
 using ErpPrinter.Printing;
@@ -446,6 +448,27 @@ public sealed class PipeSupportTests
         var received = new byte[3];
         Assert.Equal(3, await server.ReadAsync(received));
         Assert.Equal(new byte[] { 1, 2, 3 }, received);
+    }
+
+    [Fact]
+    public void Printing_users_get_write_and_delete_on_the_pipe_but_cannot_host_or_reconfigure_it()
+    {
+        var name = "ErpPrinterTest-" + Guid.NewGuid().ToString("N");
+        using var server = PipeServerFactory.Create(name);
+
+        var users = server.GetAccessControl()
+            .GetAccessRules(true, false, typeof(SecurityIdentifier))
+            .Cast<PipeAccessRule>()
+            .Single(r => r.IdentityReference.Value == PipeServerFactory.AuthenticatedUsersSid);
+
+        Assert.Equal(AccessControlType.Allow, users.AccessControlType);
+        // The spooler opens the port as the printing user with write and DELETE access; without Delete every print from a
+        // normal (non-admin) user fails in the spooler and never reaches the listener.
+        Assert.True(users.PipeAccessRights.HasFlag(PipeAccessRights.Write));
+        Assert.True(users.PipeAccessRights.HasFlag(PipeAccessRights.Delete));
+        Assert.False(users.PipeAccessRights.HasFlag(PipeAccessRights.CreateNewInstance));
+        Assert.False(users.PipeAccessRights.HasFlag(PipeAccessRights.ChangePermissions));
+        Assert.False(users.PipeAccessRights.HasFlag(PipeAccessRights.TakeOwnership));
     }
 
     [Fact]
