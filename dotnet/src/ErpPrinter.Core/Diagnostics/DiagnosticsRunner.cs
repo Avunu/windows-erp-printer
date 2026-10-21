@@ -200,11 +200,11 @@ public sealed partial class DiagnosticsRunner(
             var running = processes.Where(p => p.IsService).ToList();
             if (running.Count == 0)
                 r.Add(new DiagnosticResult(ServiceCategory, "Service process", service?.IsRunning == true ? DiagnosticStatus.Warn : DiagnosticStatus.Fail,
-                    "No ErpPrinter.Service.exe process is running.", $"Start-Service {ServiceName}; check the log folder for a crash message."));
+                    "No ErpPrinterService.exe process is running.", $"Start-Service {ServiceName}; check the log folder for a crash message."));
             else if (running.Count > 1)
                 r.Add(DiagnosticResult.Warn(ServiceCategory, "Service process",
                     $"{running.Count} processes are running it (PIDs {string.Join(", ", running.Select(p => p.Id))}).",
-                    $"Extra copies compete for the same pipe or outbox. Restart-Service {ServiceName} and end any extra ErpPrinter.Service.exe in Task Manager."));
+                    $"Extra copies compete for the same pipe or outbox. Restart-Service {ServiceName} and end any extra ErpPrinterService.exe in Task Manager."));
             else
                 r.Add(DiagnosticResult.Pass(ServiceCategory, "Service process",
                     $"Running as PID {running[0].Id}{(running[0].Started is { } started ? ", started " + Stamp(started) : "")}."));
@@ -215,7 +215,10 @@ public sealed partial class DiagnosticsRunner(
         var legacy = (processes ?? []).Where(p => p.LegacyCommandName is not null).ToList();
         if (tasks.Count == 0 && legacy.Count == 0)
         {
-            r.Add(DiagnosticResult.Pass(ServiceCategory, "Legacy scheduled tasks", "None installed."));
+            // Unelevated, the task scheduler lists nothing for tasks owned by SYSTEM, so an empty list proves nothing.
+            r.Add(system.IsElevated
+                ? DiagnosticResult.Pass(ServiceCategory, "Legacy scheduled tasks", "None installed.")
+                : DiagnosticResult.Info(ServiceCategory, "Legacy scheduled tasks", "Not checked: the tasks of the PowerShell version cannot be listed from a session that is not elevated."));
             return;
         }
         var lines = tasks.Select(t => t.Describe())

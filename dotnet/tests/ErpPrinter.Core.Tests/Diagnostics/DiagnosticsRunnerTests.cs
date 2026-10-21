@@ -333,8 +333,8 @@ public class DiagnosticsRunnerTests : IDisposable
 
         _system.Processes =
         [
-            new ErpProcessInfo(10, "ErpPrinter.Service.exe", null, null),
-            new ErpProcessInfo(11, "ErpPrinter.Service.exe", null, null),
+            new ErpProcessInfo(10, "ErpPrinterService.exe", null, null),
+            new ErpProcessInfo(11, "ErpPrinterService.exe", null, null),
         ];
         var two = await RunAsync();
         var r = Find(two, "Service process");
@@ -378,7 +378,7 @@ public class DiagnosticsRunnerTests : IDisposable
         _system.LegacyTasks.Clear();
         _system.Processes =
         [
-            new ErpProcessInfo(4242, "ErpPrinter.Service.exe", null, null),
+            new ErpProcessInfo(4242, "ErpPrinterService.exe", null, null),
             new ErpProcessInfo(99, "powershell.exe", @"powershell.exe -File ""C:\Program Files\ERP Printer\ErpPrinter.ps1"" -Command Listen", null),
         ];
         var process = await RunAsync();

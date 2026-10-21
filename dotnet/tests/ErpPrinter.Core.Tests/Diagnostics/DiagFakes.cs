@@ -97,7 +97,7 @@ internal sealed class DiagSystem : ISystemInspector
         ["ErpPrinter"] = new("ErpPrinter", "Running", "Automatic", new DateTimeOffset(2026, 10, 20, 8, 0, 0, TimeSpan.Zero)),
     };
     public List<LegacyTaskInfo> LegacyTasks { get; } = [];
-    public List<ErpProcessInfo>? Processes { get; set; } = [new ErpProcessInfo(4242, "ErpPrinter.Service.exe", null, new DateTimeOffset(2026, 10, 20, 8, 0, 1, TimeSpan.Zero))];
+    public List<ErpProcessInfo>? Processes { get; set; } = [new ErpProcessInfo(4242, "ErpPrinterService.exe", null, new DateTimeOffset(2026, 10, 20, 8, 0, 1, TimeSpan.Zero))];
     public bool? Pipe { get; set; } = true;
     public string? UserProxy { get; set; }
 

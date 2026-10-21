@@ -28,12 +28,12 @@ public sealed record LegacyTaskInfo(string Name, string State, long? LastResult 
 /// <summary>A process that may belong to ERP Printer: the service executable or a PowerShell host with a command line.</summary>
 public sealed partial record ErpProcessInfo(int Id, string Name, string? CommandLine, DateTimeOffset? Started)
 {
-    public const string ServiceExecutable = "ErpPrinter.Service";
+    public const string ServiceExecutable = "ErpPrinterService";
 
     [GeneratedRegex(@"ErpPrinter\.ps1.*-Command\s+(?<command>Listen|Upload)\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex LegacyCommand();
 
-    /// <summary>True for the C# service process (<c>ErpPrinter.Service.exe</c>).</summary>
+    /// <summary>True for the C# service process (<c>ErpPrinterService.exe</c>).</summary>
     public bool IsService =>
         Name.Equals(ServiceExecutable, StringComparison.OrdinalIgnoreCase) || Name.Equals(ServiceExecutable + ".exe", StringComparison.OrdinalIgnoreCase);
 

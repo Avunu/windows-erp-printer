@@ -81,12 +81,13 @@ public sealed class ErpPrinterContext : IDisposable
     public OutboxProcessor CreateProcessor(IOutboxSignal? signal = null, IErpLog? log = null) =>
         new(log ?? Log, Backends, Secrets, (profile, meta) => DocumentFileName.Build(profile.FileNameTemplate, meta, Time), Time, signal);
 
-    public UploaderLoop CreateUploaderLoop(IOutboxSignal signal, IErpLog? log = null)
+    /// <param name="instanceLock">Only one uploader may run per machine; tests pass their own lock instead of the machine-wide mutex.</param>
+    public UploaderLoop CreateUploaderLoop(IOutboxSignal signal, IErpLog? log = null, ISingleInstanceLock? instanceLock = null)
     {
         var uploaderLog = log ?? CreateLog("uploader");
         return new UploaderLoop(
             uploaderLog, CreateProcessor(signal, uploaderLog), new OutboxHousekeeping(uploaderLog, Time), signal, LoadConfig, Time,
-            new NamedMutexLock(), RuntimeSummary.Describe);
+            instanceLock ?? new NamedMutexLock(), RuntimeSummary.Describe);
     }
 
     public PipeListener CreateListener(IOutboxSignal signal, IErpLog? log = null)
