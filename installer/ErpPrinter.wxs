@@ -55,8 +55,14 @@
                   DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
     <MediaTemplate EmbedCab="yes" />
 
-    <!-- .NET 10 needs Windows 10 1607 / Server 2016 or later (VersionNT 1000); a running installation is never blocked. -->
-    <Launch Condition="Installed OR VersionNT64 &gt;= 1000" Message="[ProductName] requires Windows 10 or Windows Server 2016 or later (64-bit)." />
+    <!--
+      The product supports Windows 10 1607 / Windows Server 2016 and later (the .NET 10 requirement), but this check must
+      not test for 10.0: Windows Installer applies a compatibility shim to VersionNT, and on a real Windows 11 machine it
+      reported VersionNT64 = 603 and WindowsBuild = 9600 (Windows 8.1), which made a ">= 1000" condition refuse the
+      installation (error 1603). 603 is the lowest value the shim reports, so this blocks only 32-bit and pre-8.1 systems.
+      A running installation is never blocked.
+    -->
+    <Launch Condition="Installed OR VersionNT64 &gt;= 603" Message="[ProductName] requires a 64-bit version of Windows (Windows 10 or Windows Server 2016 or later)." />
 
     <Icon Id="AppIcon" SourceFile="$(IconFile)" />
     <Property Id="ARPPRODUCTICON" Value="AppIcon" />

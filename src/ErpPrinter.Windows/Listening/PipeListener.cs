@@ -235,7 +235,11 @@ public sealed class PipeListener
                 catch (Exception ex)
                 {
                     failures++;
-                    if (failures == 1 || failures % 60 == 0)
+                    // The first failure is usually transient (during an upgrade the old listener still holds the pipe for a few
+                    // seconds), so it is a warning; an error is reserved for a failure that lasts a minute or more.
+                    if (failures == 1)
+                        _log.Warning($"Cannot open pipe '{profile.PipeName}' (failure {failures}), will retry: [{ex.GetType().Name}] {ex.Message}");
+                    else if (failures % 60 == 0)
                         _log.Exception($"Cannot open pipe '{profile.PipeName}' (failure {failures})", ex);
                     await Task.Delay(_options.PipeRetryDelay, _time, token).ConfigureAwait(false);
                     continue;

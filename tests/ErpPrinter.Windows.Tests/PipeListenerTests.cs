@@ -377,6 +377,8 @@ public sealed class PipeListenerTests : IAsyncLifetime
 
         Assert.Single(_log.Entries, e => e.Message.StartsWith($"Cannot open pipe '{_pipe}' (failure 1)"));
         Assert.DoesNotContain(_log.Entries, e => e.Message.Contains("(failure 2)"));
+        // A failure that heals by itself must not look like an error in the log or in the diagnostics.
+        Assert.DoesNotContain(_log.Entries, e => e.Level == ErpPrinter.Logging.ErpLogLevel.Error);
         await SendAsync(_pipe, [1]);
         await WinWait.UntilAsync(() => _sink.Received.Count == 1, "job after recovery");
     }
