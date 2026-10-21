@@ -11,7 +11,8 @@
       "changelog-path": "CHANGELOG.md",
       "extra-files": [
         "src/Modules/ErpPrinter/ErpPrinter.psd1",
-        "src/Modules/ErpPrinter/BuildInfo.psd1"
+        "src/Modules/ErpPrinter/BuildInfo.psd1",
+        "dotnet/Directory.Build.props"
       ]
     }
   }
