@@ -16,12 +16,14 @@ BeforeAll {
             $g['DataRoot'] = $Root
             $g['LogLevel'] = $Level
             Set-ErpLogContext -Component $Component -GlobalSettings $g -Confirm:$false
+            # These tests must not write to the real Application event log of the machine they run on.
+            $script:ErpIsWindows = $false
         }
     }
 }
 
 AfterAll {
-    InModuleScope ErpPrinter { $script:ErpLogSettings = $null; $script:ErpLogComponent = 'module' }
+    InModuleScope ErpPrinter { $script:ErpLogSettings = $null; $script:ErpLogComponent = 'module'; $script:ErpIsWindows = [System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT }
 }
 
 Describe 'Test print verdict' {
@@ -162,6 +164,20 @@ Describe 'Diagnostic helpers' {
     }
 }
 
+Describe 'Report ordering' {
+    It 'leads with the job analysis rather than the printer state it caused' {
+        $text = InModuleScope ErpPrinter {
+            $results = @(
+                (New-ErpDiagnosticResult 'Profile' 'Printer state' Fail 'The spooler reports the printer as Error.' 'Check the printer.')
+                (New-ErpDiagnosticResult 'Profile' 'Print queue' Fail '1 job' 'See below.')
+                (New-ErpDiagnosticResult 'Profile' 'Job 4 analysis' Fail 'died while converting' 'Print to the built-in PDF printer.')
+            )
+            Format-ErpDiagnosticReport -Results $results
+        }
+        $text | Should -BeLike '*Start with: Profile / Job 4 analysis*'
+        $text | Should -BeLike '*Print to the built-in PDF printer.*'
+    }
+}
 Describe 'Log helpers' {
     BeforeEach {
         $script:Root = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))

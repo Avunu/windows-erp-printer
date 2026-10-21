@@ -36,6 +36,7 @@ Describe 'Invoke-ErpPrinterTestPrint' {
         Mock -ModuleName ErpPrinter Get-Printer { [pscustomobject]@{ Name = 'Send to Odoo'; PortName = $script:Port; DriverName = 'Microsoft Print To PDF' } }
         Mock -ModuleName ErpPrinter Get-ErpTaskState { 'Running' }
         Mock -ModuleName ErpPrinter Test-ErpPipeExists { $true }
+        Mock -ModuleName ErpPrinter Get-ErpJobAnalysis { [pscustomobject]@{ Stage = 'Printing'; Failed = $true; Detail = 'analysis'; Hint = '' } }
         Mock -ModuleName ErpPrinter Get-ErpPrinterStateInfo { [pscustomobject]@{ Problem = $null; Hint = ''; Summary = 'Normal' } }
         Mock -ModuleName ErpPrinter Get-WinEvent { [pscustomobject]@{ IsEnabled = $true } }
         Mock -ModuleName ErpPrinter Get-ErpPrintServiceEvents { @() }
