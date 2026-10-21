@@ -43,9 +43,16 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # The generic .NET binaries setup-dotnet downloads do not run on NixOS; take the SDK from nixpkgs there.
+      # The runner exports DOTNET_ROOT for its own .NET 8, and that wins over the SDK's runtime: the SDK's compiler then
+      # fails with "Framework 'Microsoft.NETCore.App' 10.0.x not found". Point every variable the host reads at the SDK.
       - name: Provide the .NET SDK
         if: runner.environment == 'self-hosted'
-        run: echo "$(nix build --no-link --print-out-paths nixpkgs#dotnetCorePackages.sdk_10_0)/bin" >> "$GITHUB_PATH"
+        run: |
+          sdk="$(nix build --no-link --print-out-paths nixpkgs#dotnetCorePackages.sdk_10_0)"
+          echo "$sdk/bin" >> "$GITHUB_PATH"
+          echo "DOTNET_ROOT=$sdk/share/dotnet" >> "$GITHUB_ENV"
+          echo "DOTNET_ROOT_X64=$sdk/share/dotnet" >> "$GITHUB_ENV"
+          ls "$sdk/share/dotnet/shared/Microsoft.NETCore.App"
       - uses: actions/setup-dotnet@v6
         if: runner.environment != 'self-hosted'
         with:
