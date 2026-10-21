@@ -11,4 +11,5 @@
     <Product>ERP Printer</Product>
     <Copyright>(c) 2026 Kevin Shenk. MIT License.</Copyright>
   </PropertyGroup>
+  <Import Project="$(MSBuildThisFileDirectory)Publish.props" />
 </Project>
