@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    FUTURE SWITCH. Generates docs/settings.md with the C# CLI ("erpprinter schema --settings-md <file>") instead
+    Generates docs/settings.md with the C# CLI ("erpprinter schema --settings-md <file>") instead
     of build/New-SettingsReference.ps1.
 .DESCRIPTION
     The C# Schema class becomes the source of truth for the settings once the port replaces the PowerShell
-    product. Until the CLI implements "schema", this script fails with a clear message and the PowerShell
+    product. The PowerShell
     generator (build/New-SettingsReference.ps1, build.ps1 -Task Generate) remains authoritative.
 
     -Check generates into a temporary file and compares with -OutputPath (ignoring line-ending differences)

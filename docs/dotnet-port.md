@@ -6,8 +6,10 @@ ERP Printer is being ported from PowerShell to C# (.NET 10). The PowerShell prod
 
 | Piece | State |
 | --- | --- |
-| Solution, shared foundation (`ErpPrinter.Core`), tests | in progress (`dotnet/`) |
-| Service host, CLI, configuration GUI, Windows plumbing, backends | in progress; the executables are stubs until they land |
+| Core: settings, secrets, outbox and uploader, HTTP and the four backends, update logic, diagnostics decisions, policy generators | done, ported with the PowerShell tests (421 xUnit tests) |
+| Windows layer: registry, DPAPI, log files, winspool spooler API, printer provisioning, pipe listener, diagnostics checks, test page, updater | done; the winspool **write** paths (add/remove printer and port) and the provisioner have only run against fakes |
+| Service (`ErpPrinterService.exe`), CLI (`erpprinter.exe`), configuration GUI (`ErpPrinterConfig.exe`) | done; run on a real machine only read-only so far (`status`, `diagnose`, `schema`) |
+| End-to-end test (named pipe -> listener -> outbox -> uploader -> webhook) | passing; the spooler is faked |
 | Publish layout (`build/Publish-Dotnet.ps1`) | done |
 | MSI (`installer/ErpPrinter.Service.wxs`) | builds and validates; **not yet installed anywhere** (see [Verification](#verification-state)) |
 | CI (`.github/workflows/dotnet.yml`) | done |
@@ -30,7 +32,7 @@ dotnet/
 installer/ErpPrinter.Service.wxs   WiX v5 package of the C# product
 installer/ErpPrinter.wxs           WiX v5 package of the PowerShell product (unchanged, still released)
 build/Publish-Dotnet.ps1           publish the three executables into one folder
-build/New-PolicyTemplateFromCli.ps1, build/New-SettingsReferenceFromCli.ps1   future generators, see below
+build/New-PolicyTemplateFromCli.ps1, build/New-SettingsReferenceFromCli.ps1   generators and parity checks that use `erpprinter schema`
 .config/dotnet-tools.json          repo-local tools: WiX 5.0.2
 ```
 
@@ -53,7 +55,7 @@ Prerequisites: the .NET 10 SDK (and Windows for the Windows projects, the publis
 | `DotnetSign` | Authenticode-signs the product's own `erpprinter.exe`, `ErpPrinter*.exe` and `ErpPrinter*.dll` (`-CertificatePath`, same secrets as the PowerShell product); runtime files are already signed |
 | `DotnetMsi` | `out/dotnet/ErpPrinter-Service-<version>-x64.msi` (signed too if a certificate is given) |
 | `DotnetManifest` | `latest.json` and `.sha256` next to that MSI |
-| `DotnetGenerate` | Future switch, see [Policy templates](#policy-templates-and-the-settings-reference) |
+| `DotnetGenerate` | Regenerates `policies/` and `docs/settings.md` with `erpprinter schema`, see [Policy templates](#policy-templates-and-the-settings-reference) |
 
 The version comes from `dotnet/Directory.Build.props` (release-please bumps it together with the PowerShell module version) unless `-Version` is given. `-UpdateManifestUrl` and `-Commit` are stamped into `ErpPrinter.Core` as assembly metadata (`BuildInfo`). The solution has warnings as errors.
 
@@ -122,7 +124,7 @@ Other cases: C# to C# upgrades use the same path (deprovision skipped, provision
 
 ### Policy templates and the settings reference
 
-`policies/` and `docs/settings.md` are still generated from the PowerShell schema (`./build/build.ps1 -Task Generate`). The C# `Schema` class is meant to become the source of truth. When the CLI implements `erpprinter schema --admx <dir>` (writes `ErpPrinter.admx` and `en-US\ErpPrinter.adml`) and `erpprinter schema --settings-md <file>`, run:
+`policies/` and `docs/settings.md` are still generated from the PowerShell schema (`./build/build.ps1 -Task Generate`). The C# `Schema` class is meant to become the source of truth. The CLI implements `erpprinter schema --admx <dir>` (writes `ErpPrinter.admx` and `en-US\ErpPrinter.adml`) and `erpprinter schema --settings-md <file>`. To regenerate with them, and to check parity with the committed files:
 
 ```powershell
 ./build/build.ps1 -Task DotnetPublish, DotnetGenerate
@@ -130,7 +132,7 @@ Other cases: C# to C# upgrades use the same path (deprovision skipped, provision
 ./build/New-SettingsReferenceFromCli.ps1 -Check
 ```
 
-Until then both scripts fail with an explanatory message; nothing in the default tasks calls them.
+`erpprinter schema --admx <dir>` and `--settings-md <file>` exist and both `-Check` runs pass: the C# generators reproduce the committed ADMX, ADML and `docs/settings.md` byte for byte (the unit tests assert the same). Nothing in the default tasks calls them yet; the PowerShell generators stay authoritative until cutover.
 
 ## CI
 

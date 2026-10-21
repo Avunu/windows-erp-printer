@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    FUTURE SWITCH. Generates policies/ErpPrinter.admx and policies/en-US/ErpPrinter.adml with the C# CLI
+    Generates policies/ErpPrinter.admx and policies/en-US/ErpPrinter.adml with the C# CLI
     ("erpprinter schema --admx <dir>") instead of build/New-PolicyTemplate.ps1.
 .DESCRIPTION
     The C# Schema class becomes the source of truth for the settings once the port replaces the PowerShell
-    product. Until the CLI implements "schema", this script fails with a clear message and the PowerShell
+    product. The PowerShell
     generator (build/New-PolicyTemplate.ps1, build.ps1 -Task Generate) remains authoritative.
 
     Contract with the CLI: "erpprinter schema --admx <dir>" writes <dir>\ErpPrinter.admx and

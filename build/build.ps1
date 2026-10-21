@@ -15,8 +15,8 @@
     The C# port (dotnet/, see docs/dotnet-port.md) has its own tasks; none of them is in the default list:
       DotnetBuild     dotnet build of dotnet/ErpPrinter.slnx (only the portable projects off Windows)
       DotnetTest      xUnit tests: Core anywhere, Windows tests on Windows (see -TestScope)
-      DotnetGenerate  Future switch: regenerate policies/ and docs/settings.md with "erpprinter schema ..."
-                      instead of the PowerShell generators (the schema command does not exist yet)
+      DotnetGenerate  Regenerate policies/ and docs/settings.md with "erpprinter schema ..."
+                      instead of the PowerShell generators
       DotnetPublish   Self-contained win-x64 publish of Service, Cli and Config into out/dotnet/payload
       DotnetSign      Authenticode-sign the product's own executables and assemblies (needs -CertificatePath)
       DotnetMsi       Build out/dotnet/ErpPrinter-Service-<version>-x64.msi with the repo-local WiX 5 tool,
@@ -260,7 +260,7 @@ foreach ($step in $Task) {
             }
         }
         'DotnetGenerate' {
-            # Future switch. Today policies/ and docs/settings.md come from the PowerShell schema (task Generate). Once
+            # Opt-in. Today policies/ and docs/settings.md come from the PowerShell schema (task Generate). Once
             # "erpprinter schema" exists in the C# CLI (the C# Schema class is then the source of truth), this regenerates
             # them from it. Run DotnetPublish first, or point -ErpPrinterExe at any erpprinter.exe.
             Write-Step 'Generating ADMX/ADML and the settings reference with erpprinter schema'
