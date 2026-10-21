@@ -1,5 +1,7 @@
 # Development
 
+This page describes the PowerShell product. The C# port in `dotnet/` (build, publish, MSI, CI, migration plan) is covered in [dotnet-port.md](dotnet-port.md).
+
 ## Layout
 
 ```
@@ -64,6 +66,8 @@ The unit tests replace the registry and DPAPI with in-memory fakes (`tests/Unit/
 | Test | Pester on Windows PowerShell 5.1 and PowerShell 7; NUnit XML uploaded as an artifact |
 | Build MSI | WiX v5 build, versioned `0.0.<run number>`; MSI, manifest and ADMX uploaded as an artifact |
 | End-to-end | Installs the MSI on the runner, prints, verifies delivery to a local webhook, uninstalls. Marked `continue-on-error` until it has proven stable on the hosted image |
+
+`.github/workflows/dotnet.yml` builds, tests and packages the C# port (see [dotnet-port.md](dotnet-port.md#ci)).
 
 `.github/workflows/commits.yml` checks every commit in a pull request, and the pull request title, against the rules in [Commit messages](#commit-messages).
 

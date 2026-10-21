@@ -11,10 +11,24 @@
       Msi       Build the MSI with WiX v5 (Windows only), and sign it if a certificate is given
       Manifest  Write latest.json, the .sha256 file and the ADMX zip for a release
     Lint, Test, Generate and Stage also run under PowerShell 7 on Linux/macOS.
+
+    The C# port (dotnet/, see docs/dotnet-port.md) has its own tasks; none of them is in the default list:
+      DotnetBuild     dotnet build of dotnet/ErpPrinter.slnx (only the portable projects off Windows)
+      DotnetTest      xUnit tests: Core anywhere, Windows tests on Windows (see -TestScope)
+      DotnetGenerate  Future switch: regenerate policies/ and docs/settings.md with "erpprinter schema ..."
+                      instead of the PowerShell generators (the schema command does not exist yet)
+      DotnetPublish   Self-contained win-x64 publish of Service, Cli and Config into out/dotnet/payload
+      DotnetSign      Authenticode-sign the product's own executables and assemblies (needs -CertificatePath)
+      DotnetMsi       Build out/dotnet/ErpPrinter-Service-<version>-x64.msi with the repo-local WiX 5 tool,
+                      and sign it if a certificate is given
+      DotnetManifest  Write latest.json and the .sha256 file for that MSI into out/dotnet
+    The version defaults to dotnet/Directory.Build.props for these tasks, to the module version for the others.
 .EXAMPLE
     ./build/build.ps1 -Task Lint, Test
 .EXAMPLE
     ./build/build.ps1 -Task Stage, Msi, Manifest -Version 1.2.0 -UpdateManifestUrl https://github.com/acme/windows-erp-printer/releases/latest/download/latest.json
+.EXAMPLE
+    ./build/build.ps1 -Task DotnetBuild, DotnetTest, DotnetPublish, DotnetMsi -Version 1.2.0
 #>
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Build console output.')]
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', 'CertificatePasswordEnvVar', Justification = 'Holds the name of an environment variable, not a password.')]
@@ -33,13 +47,18 @@ param(
     [string] $CertificatePath,
     [string] $CertificatePasswordEnvVar = 'SIGNING_CERT_PASSWORD',
     [string] $TimestampServer = 'http://timestamp.digicert.com',
-    [string] $WixUtilVersion = '5.0.2'
+    [string] $WixUtilVersion = '5.0.2',
+    # Dotnet* tasks only.
+    [string] $Configuration = 'Release',
+    [ValidateSet('All', 'Core', 'Windows')]
+    [string] $TestScope = 'All'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version 2.0
 # Accept "-Task Lint,Test" from powershell.exe -File, which passes lists as one string.
 $Task = @($Task | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-$knownTasks = 'Lint', 'Test', 'Generate', 'Stage', 'Sign', 'Msi', 'Manifest'
+$knownTasks = 'Lint', 'Test', 'Generate', 'Stage', 'Sign', 'Msi', 'Manifest',
+'DotnetBuild', 'DotnetTest', 'DotnetGenerate', 'DotnetPublish', 'DotnetSign', 'DotnetMsi', 'DotnetManifest'
 foreach ($name in $Task) { if ($knownTasks -notcontains $name) { throw "Unknown task '$name'. Valid tasks: $($knownTasks -join ', ')." } }
 # Windows PowerShell 5.1 leaves $PSScriptRoot empty in param() defaults under -File, so resolve here.
 if (-not $OutputDir) { $OutputDir = Join-Path $PSScriptRoot '..\out' }
@@ -69,6 +88,53 @@ function Invoke-Sign([string[]] $Path) {
         $result = Set-AuthenticodeSignature -FilePath $file -Certificate $cert -TimestampServer $TimestampServer -HashAlgorithm SHA256
         if ($result.Status -ne 'Valid') { throw "Signing $file failed: $($result.Status) $($result.StatusMessage)" }
     }
+}
+
+# --- C# port (dotnet/) -------------------------------------------------------------------------------
+$dotnetDir = Join-Path $root 'dotnet'
+$dotnetOut = Join-Path $OutputDir 'dotnet'
+$dotnetPayload = Join-Path $dotnetOut 'payload'
+$onWindows = ($PSVersionTable.PSEdition -eq 'Desktop') -or $IsWindows
+# The C# product versions itself from dotnet/Directory.Build.props (release-please bumps it with the module version).
+if ($PSBoundParameters.ContainsKey('Version')) {
+    $dotnetVersion = $Version
+} else {
+    $buildProps = [xml](Get-Content -LiteralPath (Join-Path $dotnetDir 'Directory.Build.props') -Raw)
+    $dotnetVersion = [string]($buildProps.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1).Version
+}
+$dotnetMsiName = "ErpPrinter-Service-$dotnetVersion-x64.msi"
+$dotnetMsiPath = Join-Path $dotnetOut $dotnetMsiName
+
+function Get-DotnetStampArguments {
+    @("-p:BuildCommit=$Commit", "-p:UpdateManifestUrl=$UpdateManifestUrl")
+}
+
+function Invoke-Dotnet([string[]] $Arguments) {
+    & dotnet @Arguments
+    if ($LASTEXITCODE) { throw "dotnet $($Arguments[0]) failed with exit code $LASTEXITCODE." }
+}
+
+# WiX is a repo-local tool (.config/dotnet-tools.json pins 5.0.2) and its extensions live in the repo's .wix folder,
+# so the build never depends on a global installation. Both are resolved relative to the working directory.
+function Invoke-Wix([string[]] $Arguments) {
+    Push-Location $root
+    try {
+        & dotnet tool run wix @Arguments
+        if ($LASTEXITCODE) { throw "wix $($Arguments[0]) failed with exit code $LASTEXITCODE." }
+    } finally { Pop-Location }
+}
+
+function Initialize-LocalWix {
+    Push-Location $root
+    try {
+        Invoke-Dotnet @('tool', 'restore')
+        $installed = (& dotnet tool run wix --version) -join ''
+        if ($installed -notmatch '^5\.') { throw "Expected the repo-local WiX 5, got '$installed'. Check .config/dotnet-tools.json." }
+        $extensions = (& dotnet tool run wix extension list) -join "`n"
+        if ($extensions -notmatch 'WixToolset\.Util\.wixext') {
+            Invoke-Dotnet @('tool', 'run', 'wix', 'extension', 'add', "WixToolset.Util.wixext/$WixUtilVersion")
+        }
+    } finally { Pop-Location }
 }
 
 foreach ($step in $Task) {
@@ -169,6 +235,76 @@ foreach ($step in $Task) {
             if (Test-Path $zip) { Remove-Item $zip }
             Compress-Archive -Path (Join-Path $root 'policies\*') -DestinationPath $zip
             Get-ChildItem $OutputDir -File | Format-Table Name, Length -AutoSize | Out-String | Write-Host
+        }
+        'DotnetBuild' {
+            Write-Step "dotnet build ($Configuration)"
+            # The Windows projects target net10.0-windows; off Windows only the portable core and its tests build.
+            $targets = if ($onWindows) { @(Join-Path $dotnetDir 'ErpPrinter.slnx') } else {
+                @((Join-Path $dotnetDir 'src\ErpPrinter.Core\ErpPrinter.Core.csproj'), (Join-Path $dotnetDir 'tests\ErpPrinter.Core.Tests\ErpPrinter.Core.Tests.csproj'))
+            }
+            foreach ($target in $targets) { Invoke-Dotnet (@('build', $target, '-c', $Configuration, '-nologo', '-v:minimal') + (Get-DotnetStampArguments)) }
+        }
+        'DotnetTest' {
+            Write-Step "dotnet test ($TestScope)"
+            $results = Join-Path $dotnetOut 'test-results'
+            $projects = New-Object System.Collections.Generic.List[string]
+            if ($TestScope -in 'All', 'Core') { $projects.Add('ErpPrinter.Core.Tests') }
+            if ($TestScope -in 'All', 'Windows') {
+                if ($onWindows) { $projects.Add('ErpPrinter.Windows.Tests') }
+                elseif ($TestScope -eq 'Windows') { throw 'The Windows tests need Windows.' }
+                else { Write-Warning 'Skipping ErpPrinter.Windows.Tests: not running on Windows.' }
+            }
+            foreach ($name in $projects) {
+                $project = Join-Path $dotnetDir "tests\$name\$name.csproj"
+                Invoke-Dotnet (@('test', $project, '-c', $Configuration, '-nologo', '-v:minimal', '--logger', "trx;LogFileName=$name.trx", '--results-directory', $results) + (Get-DotnetStampArguments))
+            }
+        }
+        'DotnetGenerate' {
+            # Future switch. Today policies/ and docs/settings.md come from the PowerShell schema (task Generate). Once
+            # "erpprinter schema" exists in the C# CLI (the C# Schema class is then the source of truth), this regenerates
+            # them from it. Run DotnetPublish first, or point -ErpPrinterExe at any erpprinter.exe.
+            Write-Step 'Generating ADMX/ADML and the settings reference with erpprinter schema'
+            $cli = Join-Path $dotnetPayload 'erpprinter.exe'
+            & (Join-Path $PSScriptRoot 'New-PolicyTemplateFromCli.ps1') -ErpPrinterExe $cli -OutputDir (Join-Path $root 'policies')
+            & (Join-Path $PSScriptRoot 'New-SettingsReferenceFromCli.ps1') -ErpPrinterExe $cli -OutputPath (Join-Path $root 'docs\settings.md')
+        }
+        'DotnetPublish' {
+            Write-Step "Publishing the C# product $dotnetVersion ($Commit)"
+            & (Join-Path $PSScriptRoot 'Publish-Dotnet.ps1') -OutputDir $dotnetPayload -Version $dotnetVersion `
+                -UpdateManifestUrl $UpdateManifestUrl -Commit $Commit -Configuration $Configuration
+        }
+        'DotnetSign' {
+            Write-Step 'Signing the C# executables and assemblies'
+            if (-not (Test-Path $dotnetPayload)) { throw "$dotnetPayload not found; run the DotnetPublish task first." }
+            # Only the product's own binaries: the runtime files are already signed by Microsoft.
+            $files = Get-ChildItem -Path $dotnetPayload -File | Where-Object { $_.Name -match '^(erpprinter|ErpPrinter.*)\.(exe|dll)$' } | ForEach-Object FullName
+            Invoke-Sign $files
+        }
+        'DotnetMsi' {
+            Write-Step "Building $dotnetMsiName"
+            if (-not (Test-Path $dotnetPayload)) { throw "$dotnetPayload not found; run the DotnetPublish task first." }
+            Initialize-LocalWix
+            New-Item -ItemType Directory -Force -Path $dotnetOut | Out-Null
+            Invoke-Wix @('build', (Join-Path $root 'installer\ErpPrinter.Service.wxs'), '-arch', 'x64', '-ext', 'WixToolset.Util.wixext',
+                '-d', "Version=$dotnetVersion", '-d', "PayloadDir=$dotnetPayload", '-d', "ProjectUrl=$ProjectUrl",
+                '-d', "IconFile=$(Join-Path $root 'src\erp-printer.ico')", '-o', $dotnetMsiPath)
+            Remove-Item (Join-Path $dotnetOut '*.wixpdb') -ErrorAction SilentlyContinue
+            if ($CertificatePath) { Invoke-Sign @($dotnetMsiPath) }
+        }
+        'DotnetManifest' {
+            Write-Step 'Writing the release manifest for the C# MSI'
+            if (-not (Test-Path $dotnetMsiPath)) { throw "$dotnetMsiPath not found; run the DotnetMsi task first." }
+            $hash = (Get-FileHash $dotnetMsiPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $dotnetMsiName" | Set-Content -Path "$dotnetMsiPath.sha256" -Encoding ASCII
+            $url = if ($ReleaseDownloadUrl) { $ReleaseDownloadUrl.TrimEnd('/') + "/$dotnetMsiName" } else { $dotnetMsiName }
+            [ordered]@{
+                version   = $dotnetVersion
+                url       = $url
+                sha256    = $hash
+                published = (Get-Date).ToUniversalTime().ToString('o')
+                notes     = if ($ReleaseDownloadUrl) { "$ProjectUrl/releases/tag/v$dotnetVersion" } else { '' }
+            } | ConvertTo-Json | Set-Content -Path (Join-Path $dotnetOut 'latest.json') -Encoding UTF8
+            Get-ChildItem $dotnetOut -File | Format-Table Name, Length -AutoSize | Out-String | Write-Host
         }
     }
 }

@@ -58,8 +58,16 @@ Describe 'release-please configuration' {
         foreach ($file in $script:Package.'extra-files') {
             $path = Join-Path $script:RepoRoot $file
             Test-Path $path | Should -BeTrue -Because "$file is listed in extra-files"
-            @(Select-String -Path $path -Pattern "'\d+\.\d+\.\d+' # x-release-please-version").Count | Should -Be 1 -Because $file
+            # PowerShell data files carry the marker in a trailing comment; the MSBuild props file in an XML comment.
+            $pattern = "('\d+\.\d+\.\d+' # |<Version>\d+\.\d+\.\d+</Version> <!-- )x-release-please-version"
+            @(Select-String -Path $path -Pattern $pattern).Count | Should -Be 1 -Because $file
         }
+    }
+
+    It 'keeps the C# product on the same version as the module' {
+        $moduleVersion = (Import-PowerShellDataFile (Join-Path $script:RepoRoot 'src/Modules/ErpPrinter/ErpPrinter.psd1')).ModuleVersion
+        $props = [xml](Get-Content -Raw (Join-Path $script:RepoRoot 'dotnet/Directory.Build.props'))
+        @($props.Project.PropertyGroup | Where-Object { $_.Version })[0].Version | Should -Be $moduleVersion
     }
 
     It 'keeps the module manifest and build info on the same version' {
