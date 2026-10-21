@@ -23,6 +23,20 @@ Run these in an elevated PowerShell on the affected computer (or use **Print tes
 
 Both are also available in PowerShell as `Invoke-ErpPrinterDiagnostics` and `Invoke-ErpPrinterTestPrint`.
 
+## When one application fails but the test page works
+
+Applications hand the spooler different data: the test page goes through GDI, while a browser's own print preview (Edge, Chrome) submits an XPS document. If Edge's job ends in **Error** but the test page is delivered, run **Diagnose** right after the failed print, before deleting the job. For every job stuck in the queue it reads the spooler's event timeline and the spool file's format, and says at which stage the job stopped:
+
+| Timeline | What it means |
+| --- | --- |
+| *spooled*, then nothing | The queue is paused, offline, or blocked by an earlier job |
+| *spooled -> printing started*, no print processor event | The document failed while the driver converted it to PDF. The pipe was never opened, so ERP Printer's logs stay silent. This is a document or Windows problem, not delivery |
+| *print processor finished* with a non-zero code | The print processor refused the document; the code is shown |
+| *rendering*, but not *written to port* | The spooler could not write to the pipe: check the Listener and the pipe |
+| *written to port* | The spooler is done; look for "The spooler connected to pipe" in the listener log |
+
+To find out whether the document or the queue is at fault, print the same page to the built-in **Microsoft Print to PDF** printer. In Edge, **Ctrl+Shift+P** opens the system print dialog, which uses the GDI path that the test page uses. A failed job also puts the whole printer into the Error state and holds up every job behind it, so delete it (`Get-PrintJob -PrinterName <printer> | Remove-PrintJob`) once you have the report.
+
 ## What the test print result means
 
 | Stage reached | What it means | Usual causes |

@@ -112,6 +112,7 @@ function Invoke-ErpPrinterTestPrint {
     $jobGone = $false
     $lastStatus = ''
     $everPrinting = $false
+    $lastJob = $null
     $badSince = $null
     $receivedId = $null
     $lastProgress = Get-Date
@@ -126,6 +127,7 @@ function Invoke-ErpPrinterTestPrint {
                 & $note 'Info' "Job $($job.Id) status changed from '$lastStatus' to '$status'."
             }
             $lastStatus = $status
+            $lastJob = $job
             if ($status -match 'Printing') { $everPrinting = $true }
             if (Test-ErpBadJobStatus $status) { if (-not $badSince) { $badSince = Get-Date } } else { $badSince = $null }
         } elseif ($seenJob -and -not $jobGone) {
@@ -178,6 +180,10 @@ function Invoke-ErpPrinterTestPrint {
         $evidence.TimedOut = -not ($evidence.Delivered -or $evidence.Failed -or $evidence.LastDeliveryError)
         $evidence.JobEverPrinting = $everPrinting
         if ($evidence.JobStuck) {
+            if ($lastJob) {
+                $analysis = Get-ErpJobAnalysis -Job $lastJob
+                & $note $(if ($analysis.Failed) { 'Fail' } else { 'Info' }) ('Spooler analysis: ' + ($analysis.Detail -replace '\r?\n', ' | '))
+            }
             $queueNow = @(Get-PrintJob -PrinterName $printerName -ErrorAction SilentlyContinue)
             & $note 'Info' "Print queue at the end: $(if ($queueNow.Count) { Format-ErpPrintJobList -Jobs $queueNow } else { 'empty' })."
             if ($printer) {

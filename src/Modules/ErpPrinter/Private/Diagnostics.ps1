@@ -48,6 +48,7 @@ function ConvertTo-ErpTaskResultText {
         2147942402 { 'file not found (the install folder or ErpPrinter.ps1 is missing)' }
         2147942405 { 'access denied' }
         2147943645 { 'the task could not start (check the account and logon rights)' }
+        2147946720 { 'a duplicate start was ignored because the task is already running; normal for the watchdog' }
         3221225786 { 'terminated by Ctrl+C or a console close' }
         default { 'unrecognized result' }
     }
@@ -123,6 +124,7 @@ function Get-ErpPrinterStateInfo {
     } elseif ($statusText -and $statusText -notin 'Normal', 'Idle', 'Printing', 'Processing', 'WarmingUp') {
         $problem = "The spooler reports the printer as $statusText."
         $hint = 'Open the printer queue and clear that state (Printer menu: untick "Pause Printing" or "Use Printer Offline"); jobs are not sent while it lasts.'
+        if ($statusText -eq 'Error') { $hint = 'A failed job in the queue puts the whole printer into this state; see the job analysis below. Delete the failed job, and if the printer stays in Error, restart the Print Spooler service.' }
     } elseif ($cim -and $cim.StartTime -and $cim.UntilTime -and $cim.StartTime -ne $cim.UntilTime) {
         $from = ([DateTime]$cim.StartTime).TimeOfDay
         $until = ([DateTime]$cim.UntilTime).TimeOfDay
@@ -294,7 +296,7 @@ function Get-ErpLogHistoryChecks {
         $lastStart = $starts[-1]
         $opened = @($listener | Where-Object { $_.Time -ge $lastStart.Time -and $_.Message -like 'Waiting for print jobs*' })
         if ($starts.Count -ge 5) {
-            New-ErpDiagnosticResult $category 'Listener restarts' Warn "The listener started $($starts.Count) times in 24 hours (latest $($lastStart.Time.ToString('HH:mm:ss')))." 'It is probably crashing; look for a crash or error line next to the start lines in the listener log.'
+            New-ErpDiagnosticResult $category 'Listener restarts' Warn "The listener started $($starts.Count) times in 24 hours (latest $($lastStart.Time.ToString('HH:mm:ss')))." 'Restarts are normal after an update, a settings change or a reboot. If none of those happened, it is probably crashing: look for a crash or error line next to the start lines in the listener log.'
         }
         if (-not $opened.Count) {
             New-ErpDiagnosticResult $category 'Listener pipes' Fail "The listener started at $($lastStart.Time.ToString('HH:mm:ss')) but never reported a pipe ready." 'Either no profile is enabled or opening the pipe fails; the errors below say which.'
@@ -420,11 +422,15 @@ function Get-ErpProfileChecks {
             New-ErpDiagnosticResult $category 'Print queue' Pass 'Empty.'
         } else {
             $lines = ($jobs | Select-Object -First 5 | ForEach-Object { "job $($_.Id) '$($_.DocumentName)' by $($_.UserName): $($_.JobStatus), submitted $($_.SubmittedTime)" }) -join [Environment]::NewLine
-            $stuck = @($jobs | Where-Object { Test-ErpBadJobStatus ([string]$_.JobStatus) -or ($_.SubmittedTime -and $_.SubmittedTime -lt (Get-Date).AddMinutes(-2)) })
+            $stuck = @($jobs | Where-Object { (Test-ErpBadJobStatus ([string]$_.JobStatus)) -or ($_.SubmittedTime -and $_.SubmittedTime -lt (Get-Date).AddMinutes(-2)) })
             if ($stuck.Count) {
-                New-ErpDiagnosticResult $category 'Print queue' Fail "$($jobs.Count) job(s) are sitting in the queue instead of reaching the listener:$([Environment]::NewLine)$lines" 'A job that stays here means the spooler cannot write to the pipe (listener not running, pipe missing or wrong permissions) or the printer is offline. Fix the cause, then delete the stuck jobs.'
+                New-ErpDiagnosticResult $category 'Print queue' Fail "$($jobs.Count) job(s) are sitting in the queue instead of reaching the listener:$([Environment]::NewLine)$lines" 'A job that stays here did not make it through the spooler; the analysis below says at which stage it stopped. A failed job also holds up every job behind it, so delete it once the cause is fixed.'
             } else {
                 New-ErpDiagnosticResult $category 'Print queue' Info "$($jobs.Count) job(s) in progress:$([Environment]::NewLine)$lines"
+            }
+            foreach ($stuckJob in $stuck | Select-Object -First 3) {
+                $analysis = Get-ErpJobAnalysis -Job $stuckJob
+                New-ErpDiagnosticResult $category "Job $($stuckJob.Id) analysis" $(if ($analysis.Failed) { 'Fail' } else { 'Info' }) $analysis.Detail $analysis.Hint
             }
         }
     }
@@ -500,7 +506,9 @@ function Format-ErpDiagnosticReport {
     $null = $builder.AppendLine(('Generated {0:yyyy-MM-dd HH:mm:ss} on {1}' -f (Get-Date), $env:COMPUTERNAME))
     $counts = @('Fail', 'Warn', 'Pass', 'Info') | ForEach-Object { '{0} {1}' -f @($Results | Where-Object Status -eq $_).Count, $_.ToLower() }
     $null = $builder.AppendLine(($counts -join ', '))
-    $first = $Results | Where-Object Status -eq 'Fail' | Select-Object -First 1
+    # A job that died inside the spooler explains the printer, queue and pipe symptoms around it, so lead with it.
+    $first = $Results | Where-Object { $_.Status -eq 'Fail' -and $_.Name -like 'Job * analysis' } | Select-Object -First 1
+    if (-not $first) { $first = $Results | Where-Object Status -eq 'Fail' | Select-Object -First 1 }
     if ($first) {
         $null = $builder.AppendLine()
         $null = $builder.AppendLine("Start with: $($first.Category) / $($first.Name)")
