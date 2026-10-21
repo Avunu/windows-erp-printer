@@ -6,9 +6,18 @@
     <RootNamespace>ErpPrinter.Config</RootNamespace>
     <AssemblyName>ErpPrinterConfig</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>erp-printer.ico</ApplicationIcon>
+    <!-- Consumed by the generated ApplicationConfiguration.Initialize(). -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+    <ApplicationDefaultFont>Segoe UI, 9pt</ApplicationDefaultFont>
+    <ApplicationVisualStyles>true</ApplicationVisualStyles>
+    <ApplicationUseCompatibleTextRendering>false</ApplicationUseCompatibleTextRendering>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\ErpPrinter.Core\ErpPrinter.Core.csproj" />
     <ProjectReference Include="..\ErpPrinter.Windows\ErpPrinter.Windows.csproj" />
+    <InternalsVisibleTo Include="ErpPrinter.Config.Tests" />
+    <!-- The form loads its icon from here, so it also works when the exe is renamed or hosted by a test runner. -->
+    <EmbeddedResource Include="erp-printer.ico" LogicalName="erp-printer.ico" />
   </ItemGroup>
 </Project>
