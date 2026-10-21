@@ -114,6 +114,38 @@ public sealed class PipeListenerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_small_job_that_was_written_and_closed_before_the_listener_waited_is_still_received()
+    {
+        // A job that fits in the pipe buffer can arrive while the instance is being set up: the client connects, writes and
+        // closes before WaitForConnection runs, which then fails with "The pipe is being closed" although the data is there.
+        var payload = "%PDF-1.7 small job"u8.ToArray();
+        var first = true;
+        NamedPipeServerStream RacingFactory(string name)
+        {
+            var server = PipeServerFactory.Create(name);
+            if (first)
+            {
+                first = false;
+                using var client = new NamedPipeClientStream(".", name, PipeDirection.Out);
+                client.Connect(5000);
+                client.Write(payload);
+                client.Flush();
+            }
+            return server;
+        }
+        StartListener(options: new PipeListenerOptions
+        {
+            ReloadInterval = TimeSpan.FromMilliseconds(100), PipeRetryDelay = TimeSpan.FromMilliseconds(50), PipeFactory = RacingFactory,
+        });
+
+        await WinWait.UntilAsync(() => _sink.Received.Count == 1, "job");
+
+        Assert.Equal(payload, _sink.Received[0].Bytes);
+        Assert.DoesNotContain(_log.Entries, e => e.Message.StartsWith("Failed to receive a job"));
+        await WinWait.UntilAsync(() => _signal.Count == 1, "signal");
+    }
+
+    [Fact]
     public async Task The_log_tells_the_story_of_a_job()
     {
         StartListener();
