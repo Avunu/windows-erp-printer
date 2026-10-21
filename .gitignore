@@ -8,3 +8,6 @@ obj/
 *.user
 .vs/
 TestResults/
+
+# WiX extension cache of the repo-local tool (dotnet tool run wix extension add ...)
+/.wix/
