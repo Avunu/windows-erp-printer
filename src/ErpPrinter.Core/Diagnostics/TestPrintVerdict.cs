@@ -52,6 +52,9 @@ public sealed class TestPrintEvidence
     public string? PrinterHint { get; set; }
     public bool TimedOut { get; set; }
     public int ErrorEvents { get; set; }
+
+    /// <summary>False when this session cannot read the data folder (not elevated), so the outbox and listener log are invisible.</summary>
+    public bool DataFolderReadable { get; set; } = true;
 }
 
 /// <summary>
@@ -109,6 +112,12 @@ public sealed record TestPrintVerdict(TestPrintStage Stage, bool Success, string
             return new(TestPrintStage.InQueue, false,
                 $"The spooler accepted the page but never handed it to the printer port; the job is stuck as '{e.LastJobStatus}'.{why}{pipeNote}", hint);
         }
+
+        // Unelevated: the spooler side is visible, the listener side is not. Say so instead of blaming the listener.
+        if (!e.DataFolderReadable && (e.SpoolerPrinted || e.JobGone))
+            return new(TestPrintStage.Spooled, false,
+                "The spooler handed the page to the printer port. This session cannot read the data folder, so it cannot see whether the listener received and delivered it.",
+                "Run the test print elevated to follow it to the ERP, or look in the Status tab or the Application event log (source ErpPrinter) for the 'Queued' and 'Delivered' lines of the test page.");
 
         if (e.SpoolerPrinted)
         {

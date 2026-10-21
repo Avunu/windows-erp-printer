@@ -149,8 +149,12 @@ public sealed partial class TestPrintRunner(
         if (evidence.PipeExists == true) Note(DiagnosticStatus.Pass, $"The listener is hosting {expectedPort}.");
         else if (evidence.PipeExists == false) Note(DiagnosticStatus.Fail, $"Nothing is hosting {expectedPort}; the spooler has nowhere to send the page.");
 
-        if (!FolderAccess.IsReadable(global.DataRoot))
+        evidence.DataFolderReadable = FolderAccess.IsReadable(global.DataRoot);
+        if (!evidence.DataFolderReadable)
             Note(DiagnosticStatus.Warn, $"The data folder '{global.DataRoot}' cannot be read from this session, so the outbox cannot be watched. Run elevated.");
+        // The spooler opens the port as the printing user; an administrator's rights hide problems ordinary users would hit.
+        if (system.IsElevated)
+            Note(DiagnosticStatus.Info, "This page is printed as an administrator. Users' prints go through the same pipe with their own rights; to check those, print from an unelevated session.");
         var known = await outbox.GetKnownIdsAsync(folders, cancellationToken).ConfigureAwait(false);
 
         // --- Print ----------------------------------------------------------------------------

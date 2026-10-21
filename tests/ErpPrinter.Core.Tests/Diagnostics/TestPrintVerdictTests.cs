@@ -113,6 +113,17 @@ public class TestPrintVerdictTests
     }
 
     [Fact]
+    public void Does_not_blame_the_listener_when_an_unelevated_session_cannot_see_the_outbox()
+    {
+        var v = Verdict(new() { Submitted = true, JobSeen = true, JobGone = true, SpoolerPrinted = true, SpoolerPort = @"\\.\pipe\x", ExpectedPort = @"\\.\pipe\x", DataFolderReadable = false });
+        Assert.Equal(TestPrintStage.Spooled, v.Stage);
+        Assert.False(v.Success);
+        Assert.Contains("cannot see whether the listener received", v.Summary);
+        Assert.DoesNotContain("never received", v.Summary);
+        Assert.Contains("elevated", v.Hint);
+    }
+
+    [Fact]
     public void Reports_a_page_that_never_reached_the_queue()
     {
         var v = Verdict(new() { Submitted = true });

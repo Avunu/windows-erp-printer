@@ -17,14 +17,14 @@ public class JobAnalysisTests
     }
 
     [Fact]
-    public void Blames_the_conversion_not_the_pipe_when_printing_started_but_the_print_processor_never_finished()
+    public void Points_at_port_access_for_the_printing_user_when_printing_started_but_the_print_processor_never_finished()
     {
         var v = Stage([800, 801]);
         Assert.Equal(SpoolerStage.Printing, v.Stage);
         Assert.True(v.Failed);
-        Assert.Contains("before the ERP Printer pipe was involved", v.Summary);
+        Assert.Contains("could not open the printer port as the user who printed", v.Summary);
+        Assert.Contains("delete access", v.Hint);
         Assert.Contains("Microsoft Print to PDF", v.Hint);
-        Assert.Contains("Ctrl+Shift+P", v.Hint);
     }
 
     [Fact]
@@ -71,7 +71,8 @@ public class JobAnalysisTests
     [Fact]
     public async Task Reproduces_the_diagnosis_of_a_job_that_died_in_the_print_processor()
     {
-        // A Microsoft Edge XPS job that died while the driver converted it to PDF (field report, 2026-10-20).
+        // A Microsoft Edge job from a non-administrator that never reached the pipe (field report, 2026-10-20). The cause turned
+        // out to be the pipe ACL (no delete access for users), not the PDF conversion the first diagnosis suspected.
         var t = new DateTimeOffset(2026, 10, 20, 17, 27, 35, TimeSpan.Zero);
         var log = new DiagPrintServiceLog();
         log.Operational.Add(DiagPrintServiceLog.Event(307, @"Document 3, Print Document owned by jdoe on \\PC was printed on Send to Odoo through port \\.\pipe\x. Size in bytes: 92349.", t));
@@ -91,8 +92,8 @@ public class JobAnalysisTests
         Assert.Contains("17:27:35 spooled -> 17:27:40 printing started", analysis.Detail);
         // Job 3's events belong to another job and must not leak into this timeline.
         Assert.DoesNotContain("written to port", analysis.Detail);
-        Assert.Contains("before the ERP Printer pipe was involved", analysis.Detail);
-        Assert.Contains("Microsoft Print to PDF", analysis.Hint);
+        Assert.Contains("could not open the printer port as the user who printed", analysis.Detail);
+        Assert.Contains("delete access", analysis.Hint);
     }
 
     [Fact]

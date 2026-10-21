@@ -55,8 +55,8 @@ public sealed partial record SpoolerStageVerdict(SpoolerStage Stage, bool Failed
 
         if (ids.Contains(801))
             return new(SpoolerStage.Printing, true,
-                "The spooler started printing but its print processor never finished (there is no 'sent through the print processor' event) and nothing reached the port. The document failed while the driver was converting it to PDF, before the ERP Printer pipe was involved.",
-                "Print the same document to the built-in 'Microsoft Print to PDF' printer. If that fails too, the cause is the document or Windows. If only this queue fails, try the application's system print dialog instead of its own print preview (in Edge, Ctrl+Shift+P). Then delete the failed job: it blocks every job behind it.");
+                "The spooler started printing but its print processor never finished (there is no 'sent through the print processor' event) and nothing reached the port. Either the spooler could not open the printer port as the user who printed, or the driver failed while converting the document to PDF.",
+                "The spooler opens the port while impersonating the user who printed and needs write and delete access to it; listeners from ERP Printer 0.5.0 and older granted only write, so prints from non-administrators fail while elevated test prints work. Update ERP Printer (the listener re-creates the pipe with the right access when it starts). If the job came from an administrator, print the same document to the built-in 'Microsoft Print to PDF' printer: if that fails too, the cause is the document or Windows. Then delete the failed job: it blocks every job behind it.");
 
         if (ids.Contains(800))
             return new(SpoolerStage.Spooled, true,
