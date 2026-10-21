@@ -15,7 +15,7 @@ public sealed record ProfileFolders(string Root, string Outbox, string Failed, s
 }
 
 /// <summary>A document found in one of a profile's folders. <see cref="Folder"/> is "outbox", "failed" or "sent".</summary>
-public sealed record OutboxItem(string Id, string Folder, OutboxMeta Meta);
+public sealed record ScannedOutboxItem(string Id, string Folder, OutboxMeta Meta);
 
 /// <summary>The running delivery count kept in <c>delivered.json</c>.</summary>
 public sealed class DeliveryStats
@@ -34,21 +34,21 @@ public static class OutboxReader
     private static readonly JsonSerializerOptions Options = new() { PropertyNameCaseInsensitive = true };
 
     /// <summary>The sidecars in <paramref name="folder"/>, oldest first by last write time. Unreadable or half-written files are skipped.</summary>
-    public static async Task<IReadOnlyList<OutboxItem>> ReadFolderAsync(string folder, string folderName, CancellationToken cancellationToken = default)
+    public static async Task<IReadOnlyList<ScannedOutboxItem>> ReadFolderAsync(string folder, string folderName, CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(folder)) return [];
         List<FileInfo> files;
         try { files = new DirectoryInfo(folder).EnumerateFiles("*.json").OrderBy(f => f.LastWriteTimeUtc).ToList(); }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return []; }
 
-        var items = new List<OutboxItem>();
+        var items = new List<ScannedOutboxItem>();
         foreach (var file in files)
         {
             var id = Path.GetFileNameWithoutExtension(file.Name);
             var meta = await TryReadAsync<OutboxMeta>(file.FullName, cancellationToken).ConfigureAwait(false);
             if (meta is null) continue;
             if (meta.Id.Length == 0) meta.Id = id;
-            items.Add(new OutboxItem(id, folderName, meta));
+            items.Add(new ScannedOutboxItem(id, folderName, meta));
         }
         return items;
     }
@@ -80,7 +80,7 @@ public interface IOutboxScanner
     /// Looks for the test page's document in the outbox, failed and sent folders, ignoring <paramref name="known"/> ids. Matches the unique
     /// token in the title; if the spooler job could not be looked up (so the title is empty) a single new untitled document is accepted.
     /// </summary>
-    Task<OutboxItem?> FindTestPageAsync(ProfileFolders folders, string token, IReadOnlySet<string> known, CancellationToken cancellationToken = default);
+    Task<ScannedOutboxItem?> FindTestPageAsync(ProfileFolders folders, string token, IReadOnlySet<string> known, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Port of Find-ErpTestPrintItem on the real file system.</summary>
@@ -95,9 +95,9 @@ public sealed class FileSystemOutboxScanner : IOutboxScanner
         return known;
     }
 
-    public async Task<OutboxItem?> FindTestPageAsync(ProfileFolders folders, string token, IReadOnlySet<string> known, CancellationToken cancellationToken = default)
+    public async Task<ScannedOutboxItem?> FindTestPageAsync(ProfileFolders folders, string token, IReadOnlySet<string> known, CancellationToken cancellationToken = default)
     {
-        var candidates = new List<OutboxItem>();
+        var candidates = new List<ScannedOutboxItem>();
         foreach (var (folder, name) in Folders(folders))
             foreach (var item in await OutboxReader.ReadFolderAsync(folder, name, cancellationToken).ConfigureAwait(false))
                 if (!known.Contains(item.Id)) candidates.Add(item);

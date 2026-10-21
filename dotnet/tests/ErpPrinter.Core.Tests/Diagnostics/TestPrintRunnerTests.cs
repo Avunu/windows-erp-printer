@@ -51,11 +51,11 @@ public class TestPrintRunnerTests : IDisposable
 
     private static string PageName => $"ERP Printer test page [{Token}]";
 
-    private static OutboxItem Item(string folder, Action<OutboxMeta>? edit = null)
+    private static ScannedOutboxItem Item(string folder, Action<OutboxMeta>? edit = null)
     {
         var meta = new OutboxMeta { Id = "doc1", Profile = DiagData.ProfileName, Title = PageName, RemoteId = "42" };
         edit?.Invoke(meta);
-        return new OutboxItem("doc1", folder, meta);
+        return new ScannedOutboxItem("doc1", folder, meta);
     }
 
     [Fact]
