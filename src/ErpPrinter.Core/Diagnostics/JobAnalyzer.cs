@@ -64,7 +64,8 @@ public sealed partial class JobAnalyzer(IPrintServiceLog log, ISpoolFileInspecto
         return new JobAnalysis(verdict.Stage, verdict.Failed, detail, verdict.Hint);
     }
 
-    private static bool MentionsJob(string message, int jobId)
+    /// <summary>Whether a PrintService event is about <paramref name="jobId"/>: its first number is the job number.</summary>
+    internal static bool MentionsJob(string message, int jobId)
     {
         var match = FirstNumber().Match(message);
         return match.Success && int.TryParse(match.Value, out var number) && number == jobId;

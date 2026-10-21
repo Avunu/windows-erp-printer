@@ -3,6 +3,7 @@ using ErpPrinter.Logging;
 using ErpPrinter.Outbox;
 using ErpPrinter.Printing;
 using ErpPrinter.Settings;
+using DeliveryStats = ErpPrinter.Diagnostics.DeliveryStats;
 
 namespace ErpPrinter.Core.Tests.Diagnostics;
 
@@ -114,12 +115,16 @@ internal sealed class DiagSystem : ISystemInspector
 internal sealed class DiagScanner : IOutboxScanner
 {
     public Func<string, IReadOnlySet<string>, ScannedOutboxItem?> Find { get; set; } = (_, _) => null;
+    public Func<DeliveryStats> Stats { get; set; } = () => new DeliveryStats();
 
     public Task<IReadOnlySet<string>> GetKnownIdsAsync(ProfileFolders folders, CancellationToken cancellationToken = default) =>
         Task.FromResult<IReadOnlySet<string>>(new HashSet<string>());
 
     public Task<ScannedOutboxItem?> FindTestPageAsync(ProfileFolders folders, string token, IReadOnlySet<string> known, CancellationToken cancellationToken = default) =>
         Task.FromResult(Find(token, known));
+
+    public Task<DeliveryStats> GetDeliveryStatsAsync(ProfileFolders folders, CancellationToken cancellationToken = default) =>
+        Task.FromResult(Stats());
 }
 
 internal sealed class DiagPageSender : ITestPageSender

@@ -156,6 +156,7 @@ public sealed partial class TestPrintRunner(
         if (system.IsElevated)
             Note(DiagnosticStatus.Info, "This page is printed as an administrator. Users' prints go through the same pipe with their own rights; to check those, print from an unelevated session.");
         var known = await outbox.GetKnownIdsAsync(folders, cancellationToken).ConfigureAwait(false);
+        var deliveredBefore = (await outbox.GetDeliveryStatsAsync(folders, cancellationToken).ConfigureAwait(false)).Count;
 
         // --- Print ----------------------------------------------------------------------------
         if (printer is not null)
@@ -247,6 +248,18 @@ public sealed partial class TestPrintRunner(
                 Note(DiagnosticStatus.Pass, "Delivered to the ERP (the document was removed from the outbox).");
                 break;
             }
+            else
+            {
+                // Never seen in a folder: with KeepSentDays = 0 a fast delivery deletes the document between two polls.
+                var stats = await outbox.GetDeliveryStatsAsync(folders, cancellationToken).ConfigureAwait(false);
+                if (stats.Count > deliveredBefore && (stats.LastTitle ?? "").Contains(token, StringComparison.OrdinalIgnoreCase))
+                {
+                    evidence.Received = true;
+                    evidence.Delivered = true;
+                    Note(DiagnosticStatus.Pass, $"The listener received it and it was delivered to the ERP (remote id {stats.LastRemoteId}) before it showed up in the outbox.");
+                    break;
+                }
+            }
 
             if (badSince is { } since && _time.GetLocalNow() - since >= options.StuckAfter)
             {
@@ -301,7 +314,7 @@ public sealed partial class TestPrintRunner(
                 }
             }
 
-            await CollectSpoolerLogsAsync(evidence, start, token, printerName, expectedPort, Note, cancellationToken).ConfigureAwait(false);
+            await CollectSpoolerLogsAsync(evidence, start, token, lastJob?.Id, printerName, expectedPort, Note, cancellationToken).ConfigureAwait(false);
             await CollectListenerLogAsync(evidence, start, Note, cancellationToken).ConfigureAwait(false);
 
             if (evidence.Received && !evidence.Delivered)
@@ -317,7 +330,7 @@ public sealed partial class TestPrintRunner(
     }
 
     private async Task CollectSpoolerLogsAsync(
-        TestPrintEvidence evidence, DateTimeOffset start, string token, string printerName, string expectedPort,
+        TestPrintEvidence evidence, DateTimeOffset start, string token, int? jobId, string printerName, string expectedPort,
         Action<DiagnosticStatus, string> note, CancellationToken cancellationToken)
     {
         try
@@ -340,7 +353,9 @@ public sealed partial class TestPrintRunner(
             foreach (var ev in events)
             {
                 note(ev.IsProblem ? DiagnosticStatus.Warn : DiagnosticStatus.Info, "Spooler log: " + PrintServiceEventFormatter.Format(ev));
-                if (Mentions(ev.Message, token) && ev.Id == 307)
+                // Windows logs the title as "Print Document" unless document names are enabled, so also match the job number.
+                var aboutThisJob = Mentions(ev.Message, token) || (jobId is { } id && JobAnalyzer.MentionsJob(ev.Message, id));
+                if (aboutThisJob && ev.Id == 307)
                 {
                     evidence.SpoolerPrinted = true;
                     if (Mentions(ev.Message, expectedPort)) evidence.SpoolerPort = expectedPort;

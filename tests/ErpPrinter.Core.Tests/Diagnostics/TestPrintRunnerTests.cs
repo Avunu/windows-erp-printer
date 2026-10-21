@@ -3,6 +3,7 @@ using ErpPrinter.Logging;
 using ErpPrinter.Outbox;
 using ErpPrinter.Printing;
 using ErpPrinter.Settings;
+using DeliveryStats = ErpPrinter.Diagnostics.DeliveryStats;
 
 namespace ErpPrinter.Core.Tests.Diagnostics;
 
@@ -162,6 +163,52 @@ public class TestPrintRunnerTests : IDisposable
         var result = await RunAsync(options: Options(timeout: 5));
 
         Assert.Equal("PORTPROMPT:", result.Evidence.SpoolerPort);
+    }
+
+    [Fact]
+    public async Task Matches_event_307_by_job_number_when_Windows_hides_the_document_name()
+    {
+        // The default 307 text says "Print Document", not the title; job 2 is another print on the same printer.
+        _spooler.Jobs = _ => _sent && _ticks < 3 ? [DiagData.Job(3, PageName, JobStatusFlags.Printing)] : [];
+        _log.Operational.Add(DiagPrintServiceLog.Event(307,
+            @"Document 2, Print Document owned by jdoe on \\PC was printed on Send to Odoo through port FILE:. Size in bytes: 77500.", _clock.GetUtcNow()));
+        _log.Operational.Add(DiagPrintServiceLog.Event(307,
+            @"Document 3, Print Document owned by jdoe on \\PC was printed on Send to Odoo through port \\.\pipe\x. Size in bytes: 89674.", _clock.GetUtcNow()));
+
+        var result = await RunAsync(options: Options(timeout: 5));
+
+        Assert.True(result.Evidence.SpoolerPrinted);
+        Assert.Equal(@"\\.\pipe\x", result.Evidence.SpoolerPort);
+    }
+
+    [Fact]
+    public async Task Recognises_a_page_delivered_and_deleted_before_it_was_ever_seen_in_the_outbox()
+    {
+        // KeepSentDays = 0 and a fast ERP: the document is gone between two polls; only delivered.json records it.
+        _scanner.Stats = () => new DeliveryStats { Count = 5, LastTitle = "Earlier invoice" };
+        _sender.OnSend = _ =>
+        {
+            _sent = true;
+            _scanner.Stats = () => new DeliveryStats { Count = 6, LastTitle = PageName, LastRemoteId = "HTTP 200" };
+        };
+        _spooler.Jobs = _ => _sent && _ticks < 1 ? [DiagData.Job(3, PageName, JobStatusFlags.Printing)] : [];
+
+        var result = await RunAsync();
+
+        Assert.True(result.Success);
+        Assert.Equal(TestPrintStage.Delivered, result.Stage);
+        Assert.Contains("remote id HTTP 200", result.Report);
+    }
+
+    [Fact]
+    public async Task Does_not_take_an_older_delivery_for_the_test_page()
+    {
+        _scanner.Stats = () => new DeliveryStats { Count = 5, LastTitle = PageName };
+        _spooler.Jobs = _ => _sent && _ticks < 1 ? [DiagData.Job(3, PageName, JobStatusFlags.Printing)] : [];
+
+        var result = await RunAsync(options: Options(timeout: 5));
+
+        Assert.False(result.Evidence.Delivered);
     }
 
     [Fact]

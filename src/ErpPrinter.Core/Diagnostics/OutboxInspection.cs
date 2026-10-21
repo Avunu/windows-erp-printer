@@ -81,6 +81,12 @@ public interface IOutboxScanner
     /// token in the title; if the spooler job could not be looked up (so the title is empty) a single new untitled document is accepted.
     /// </summary>
     Task<ScannedOutboxItem?> FindTestPageAsync(ProfileFolders folders, string token, IReadOnlySet<string> known, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// The profile's running delivery count and last delivery. With KeepSentDays = 0 a delivered document is deleted at once, sometimes
+    /// before the test print ever sees it in a folder; the last delivered title still shows that it arrived.
+    /// </summary>
+    Task<DeliveryStats> GetDeliveryStatsAsync(ProfileFolders folders, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Port of Find-ErpTestPrintItem on the real file system.</summary>
@@ -108,6 +114,9 @@ public sealed class FileSystemOutboxScanner : IOutboxScanner
         var untitled = candidates.Where(c => string.IsNullOrEmpty(c.Meta.Title)).ToList();
         return untitled.Count == 1 ? untitled[0] : null;
     }
+
+    public Task<DeliveryStats> GetDeliveryStatsAsync(ProfileFolders folders, CancellationToken cancellationToken = default) =>
+        OutboxReader.ReadStatsAsync(folders.Stats, cancellationToken);
 
     private static IEnumerable<(string Path, string Name)> Folders(ProfileFolders f) =>
         [(f.Outbox, "outbox"), (f.Failed, "failed"), (f.Sent, "sent")];
