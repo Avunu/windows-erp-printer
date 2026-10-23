@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.0](https://github.com/Avunu/windows-erp-printer/compare/v0.4.0...v0.5.0) (2026-10-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* scripts that import the ErpPrinter PowerShell module or call ErpPrinter.ps1 must use erpprinter.exe instead; see docs/upgrading.md for the command mapping. Installations are upgraded in place by the MSI.
+
+### Features
+
+* make the C# service the only product ([#15](https://github.com/Avunu/windows-erp-printer/issues/15)) ([8be4e3d](https://github.com/Avunu/windows-erp-printer/commit/8be4e3d4d6ce8eac965470ccdfb2bc750ca8dca4))
+
+
+### Bug Fixes
+
+* **listener:** keep small jobs that arrive while a pipe is being set up ([#27](https://github.com/Avunu/windows-erp-printer/issues/27)) ([4472658](https://github.com/Avunu/windows-erp-printer/commit/447265875dd74083be572f254943cecf5d0005e1))
+
 ## [0.4.0](https://github.com/Avunu/windows-erp-printer/compare/v0.3.0...v0.4.0) (2026-10-20)
 
 

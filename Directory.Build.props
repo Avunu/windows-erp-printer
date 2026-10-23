@@ -6,7 +6,7 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <Deterministic>true</Deterministic>
     <InvariantGlobalization>true</InvariantGlobalization>
-    <Version>0.4.0</Version> <!-- x-release-please-version -->
+    <Version>0.5.0</Version> <!-- x-release-please-version -->
     <Company>ERP Printer Project</Company>
     <Product>ERP Printer</Product>
     <Copyright>(c) 2026 Kevin Shenk. MIT License.</Copyright>
