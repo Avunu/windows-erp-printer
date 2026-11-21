@@ -31,3 +31,24 @@ updates:
       - dependency-name: wix
         versions:
           - ">= 6"
+  # Root manifest: .config/dotnet-tools.json pins the WiX tool that build/build.ps1 uses.
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    labels:
+      - dependencies
+    commit-message:
+      prefix: build
+      include: scope
+    groups:
+      nuget-root:
+        patterns:
+          - "*"
+    ignore:
+      # Same guard as the nuget entry above: WiX 6 and later need the Open Source Maintenance Fee EULA accepted.
+      - dependency-name: wix
+        versions:
+          - ">= 6"
