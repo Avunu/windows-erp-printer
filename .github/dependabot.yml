@@ -4,6 +4,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     # Conventional Commits title ("ci(deps): bump ..."), so the commit check passes and the
     # update stays out of the changelog.
     commit-message:
@@ -15,6 +17,8 @@ updates:
       - /tests/*
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: build
       include: scope
