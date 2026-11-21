@@ -12,6 +12,8 @@ workflows:
         - 'actions/upload-artifact@v7.0.2'
     '.github/workflows/commits.yml':
         - 'actions/checkout@v7.0.1'
+    '.github/workflows/dependabot-auto-merge.yml': []
+    '.github/workflows/dependabot-update-branches.yml': []
     '.github/workflows/release-assets.yml':
         - 'actions/checkout@v7.0.1'
         - 'actions/setup-dotnet@v6.1.0'

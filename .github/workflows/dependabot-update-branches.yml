@@ -1,0 +1,28 @@
+name: Dependabot update branches
+
+# Brings each open Dependabot pull request that is behind main up to date, so auto-merge does not wait
+# on a stale branch. An update made with GITHUB_TOKEN raises no event, so the workflows named in dispatch
+# are run on the updated branch instead; with the App token that is not needed.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  update-branches:
+    permissions:
+      contents: write # the update-branch API merges main into each pull request's branch
+      pull-requests: write # lists the pull requests and updates them
+      actions: write # dispatches the workflows named in dispatch
+    uses: Avunu/gitops/.github/workflows/dependabot-update-branches.yml@81c8a8dbb2dee20ab5defab9a4ff9936dba1541d # v1.0.0
+    # The workflows that produce the checks main requires: ci.yml (Core tests, Build and MSI, End-to-end)
+    # and commits.yml (Conventional Commits).
+    with:
+      dispatch: ci.yml commits.yml
+    secrets:
+      APP_ID: ${{ vars.AVUNU_CI_APP_ID || secrets.AVUNU_CI_APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.AVUNU_CI_PRIVATE_KEY }}
