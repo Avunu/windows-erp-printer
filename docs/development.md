@@ -105,11 +105,7 @@ Allowed types: `build`, `chore`, `ci`, `docs`, `feat`, `fix`, `perf`, `refactor`
 
 Keep HTML-like tags out of the subject and any `BREAKING CHANGE:` note (write "the picture element", not the tag). release-please round-trips the release PR body through an HTML parser, and a raw tag there can silently drop the release. The checker rejects them.
 
-`build/Test-CommitMessage.ps1` holds the rules. CI runs it on pull requests; to run it on every local commit:
-
-```sh
-git config core.hooksPath .githooks
-```
+`build/Test-CommitMessage.ps1` holds the rules. CI runs it on pull requests. No local hook runs it: the check needs PowerShell, which the repo does not lock.
 
 If you squash-merge, the pull request title becomes the commit message, which is why CI checks the title too.
 
