@@ -1,0 +1,20 @@
+name: Dependabot auto-merge
+
+# Enables auto-merge on each Dependabot pull request. GitHub merges it once every required check
+# passes (the ones the branch ruleset lists), so a pull request whose checks fail stays open.
+# The policy and the App token live in Avunu/gitops.
+on:
+  pull_request:
+
+permissions: {}
+
+jobs:
+  auto-merge:
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    permissions:
+      contents: write # gh pr merge --auto
+      pull-requests: write # gh pr merge --auto
+    uses: Avunu/gitops/.github/workflows/dependabot-auto-merge.yml@81c8a8dbb2dee20ab5defab9a4ff9936dba1541d # v1.0.0
+    secrets:
+      APP_ID: ${{ vars.AVUNU_CI_APP_ID || secrets.AVUNU_CI_APP_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.AVUNU_CI_PRIVATE_KEY }}

@@ -25,7 +25,7 @@ jobs:
     name: Core tests (portable)
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || fromJSON('["self-hosted","nixos"]') }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7.0.1
       # The generic .NET binaries setup-dotnet downloads do not run on NixOS; take the SDK from nixpkgs there.
       # The runner exports DOTNET_ROOT for its own .NET 8, and that wins over the SDK's runtime: the SDK's compiler then
       # fails with "Framework 'Microsoft.NETCore.App' 10.0.x not found". Point every variable the host reads at the SDK.
@@ -39,7 +39,7 @@ jobs:
           echo "DOTNET_ROOT=$sdk/share/dotnet" >> "$GITHUB_ENV"
           echo "DOTNET_ROOT_X64=$sdk/share/dotnet" >> "$GITHUB_ENV"
           ls "$sdk/share/dotnet/shared/Microsoft.NETCore.App"
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/setup-dotnet@v6.1.0
         if: runner.environment != 'self-hosted'
         with:
           dotnet-version: 10.0.x
@@ -51,7 +51,7 @@ jobs:
         run: dotnet test tests/ErpPrinter.Core.Tests/ErpPrinter.Core.Tests.csproj -c Release --no-build --logger "trx;LogFileName=ErpPrinter.Core.Tests.trx" --results-directory out/test-results
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: test-results-core
           path: out/test-results
@@ -62,8 +62,8 @@ jobs:
     name: Build, Windows tests and MSI
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-dotnet@v6
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
         with:
           dotnet-version: 10.0.x
       # WiX 5.0.2 comes from .config/dotnet-tools.json (a repo-local tool), restored by the Msi task.
@@ -78,13 +78,13 @@ jobs:
           -UpdateManifestUrl "${{ github.server_url }}/${{ github.repository }}/releases/latest/download/latest.json"
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: test-results-windows
           path: out/test-results
           if-no-files-found: ignore
       - name: Upload the MSI
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: msi
           path: |
@@ -94,7 +94,7 @@ jobs:
             out/*-admx.zip
       # The published folder is what the MSI packs; keeping it makes a broken MSI easy to diagnose.
       - name: Upload the published payload
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: payload
           path: out/payload
@@ -108,8 +108,8 @@ jobs:
     # Print to PDF feature on Windows Server). Flip to false once it is reliably green.
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/download-artifact@v8.0.2
         with:
           name: msi
           path: out
@@ -120,7 +120,7 @@ jobs:
           ./tests/E2E/Invoke-E2ETest.ps1 -MsiPath $msi.FullName
       - name: Upload diagnostics
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: e2e-diagnostics
           path: out/e2e
